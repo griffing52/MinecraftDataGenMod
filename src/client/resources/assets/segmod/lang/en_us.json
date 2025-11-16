@@ -1,0 +1,5 @@
+{
+  "category.segmod": "Segmentation Mod",
+  "key.segmod.capture_frame": "Capture Frame (RGB + Seg + Depth)",
+  "key.segmod.toggle_auto_capture": "Toggle Automatic Capture"
+}
