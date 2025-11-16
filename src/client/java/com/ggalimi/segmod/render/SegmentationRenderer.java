@@ -46,26 +46,12 @@ public class SegmentationRenderer {
         
         // Get camera information
         Vec3d cameraPos = client.gameRenderer.getCamera().getPos();
-        float fov = (float) client.options.getFov().getValue();
-        float aspectRatio = (float) width / height;
-        
-        // Calculate view frustum parameters
-        float tanHalfFov = (float) Math.tan(Math.toRadians(fov / 2.0));
-        float viewWidth = 2.0f * tanHalfFov * aspectRatio;
-        float viewHeight = 2.0f * tanHalfFov;
-        
-        // Get camera rotation
-        float pitch = client.gameRenderer.getCamera().getPitch();
-        float yaw = client.gameRenderer.getCamera().getYaw();
         
         // Raycast for each pixel
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // Calculate ray direction for this pixel
-                float ndcX = (2.0f * x / width) - 1.0f;
-                float ndcY = 1.0f - (2.0f * y / height);
-                
-                Vec3d rayDir = calculateRayDirection(ndcX, ndcY, pitch, yaw, viewWidth, viewHeight);
+                // Get ray direction from camera for this pixel
+                Vec3d rayDir = getRayFromCamera(x, y, width, height);
                 
                 // Perform raycast
                 HitResult hit = raycast(world, cameraPos, rayDir, 100.0);
@@ -95,22 +81,38 @@ public class SegmentationRenderer {
     }
     
     /**
-     * Calculates the ray direction for a given screen-space coordinate.
+     * Gets a ray from the camera through a specific pixel on screen.
+     * Uses Minecraft's camera directly to match the rendered view exactly.
      */
-    private static Vec3d calculateRayDirection(float ndcX, float ndcY, float pitch, float yaw, 
-                                               float viewWidth, float viewHeight) {
-        // Convert screen space to view space
-        float viewX = ndcX * viewWidth / 2.0f;
-        float viewY = ndcY * viewHeight / 2.0f;
+    private static Vec3d getRayFromCamera(int pixelX, int pixelY, int screenWidth, int screenHeight) {
+        // Use Minecraft's built-in method to get the ray for a pixel
+        // This ensures FOV and projection match exactly
+        net.minecraft.client.render.Camera camera = client.gameRenderer.getCamera();
         
-        // Create direction vector in view space
-        Vec3d dir = new Vec3d(viewX, viewY, -1.0).normalize();
+        // Convert pixel coordinates to normalized device coordinates [-1, 1]
+        // Negate X to fix horizontal flip
+        float x = 1.0f - (2.0f * pixelX) / screenWidth;
+        float y = 1.0f - (2.0f * pixelY) / screenHeight;
         
-        // Rotate by camera orientation
-        dir = rotateByPitch(dir, -pitch);
-        dir = rotateByYaw(dir, -yaw);
+        // Get FOV - use base FOV value (dynamic effects are minimal)
+        double fov = client.options.getFov().getValue();
+        double fovScale = Math.tan(Math.toRadians(fov / 2.0));
+        double aspectRatio = (double) screenWidth / screenHeight;
         
-        return dir;
+        // Calculate view-space offsets
+        double viewX = x * fovScale * aspectRatio;
+        double viewY = y * fovScale;
+        
+        // Get camera rotation vectors
+        org.joml.Vector3f forwardVec = camera.getHorizontalPlane();
+        org.joml.Vector3f upVec = camera.getVerticalPlane();
+        Vec3d forward = new Vec3d(forwardVec.x, forwardVec.y, forwardVec.z);
+        Vec3d up = new Vec3d(upVec.x, upVec.y, upVec.z);
+        Vec3d right = up.crossProduct(forward).normalize();
+        
+        // Build ray direction
+        Vec3d rayDir = forward.add(right.multiply(viewX)).add(up.multiply(viewY));
+        return rayDir.normalize();
     }
     
     /**
@@ -170,22 +172,11 @@ public class SegmentationRenderer {
         }
         
         Vec3d cameraPos = client.gameRenderer.getCamera().getPos();
-        float fov = (float) client.options.getFov().getValue();
-        float aspectRatio = (float) width / height;
-        float pitch = client.gameRenderer.getCamera().getPitch();
-        float yaw = client.gameRenderer.getCamera().getYaw();
-        
-        float tanHalfFov = (float) Math.tan(Math.toRadians(fov / 2.0));
-        float viewWidth = 2.0f * tanHalfFov * aspectRatio;
-        float viewHeight = 2.0f * tanHalfFov;
         
         // Sample at lower resolution and upscale
         for (int y = 0; y < height; y += sampleRate) {
             for (int x = 0; x < width; x += sampleRate) {
-                float ndcX = (2.0f * x / width) - 1.0f;
-                float ndcY = 1.0f - (2.0f * y / height);
-                
-                Vec3d rayDir = calculateRayDirection(ndcX, ndcY, pitch, yaw, viewWidth, viewHeight);
+                Vec3d rayDir = getRayFromCamera(x, y, width, height);
                 HitResult hit = raycast(world, cameraPos, rayDir, 100.0);
                 
                 int[] color;
