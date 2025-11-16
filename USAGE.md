@@ -24,26 +24,33 @@ These are standard screenshots showing exactly what you see in-game, including:
 - Quality assurance
 
 ### Segmentation Masks (`*_seg.png`)
-Pixel-wise classification where each block type has a unique color:
+Pixel-wise classification where each block type and entity type has a unique color:
 
 ```
 Stone: RGB(123, 45, 67)
 Grass: RGB(89, 234, 12)
 Water: RGB(45, 167, 223)
+Zombie: RGB(234, 156, 78)
+Player: RGB(200, 100, 150)
 Sky/Air: RGB(0, 0, 0)
 ```
 
 **Important notes:**
-- Colors are deterministic (same block = same color always)
-- Generated via hash of block registry ID
+- Colors are deterministic (same block/entity = same color always)
+- Generated via hash of block/entity registry ID
+- **Entities take priority** - if an entity is in front of a block, you see the entity color
+- Entity colors use a different algorithm than blocks to minimize collision risk
+- Includes all entities: mobs, players, items, projectiles, vehicles, etc.
 - No two block types will have the same color
+- No two entity types will have the same color
 - Sky/air/void is always black
 
 **Use cases:**
 - Training semantic segmentation models
-- Block type classification
-- Scene understanding
-- Material recognition
+- Block and entity type classification
+- Scene understanding with dynamic objects
+- Material and object recognition
+- Mob detection and tracking
 
 ### Depth Maps (`*_depth.png`)
 Grayscale images representing distance from camera:
@@ -227,18 +234,25 @@ BufferedImage mask = SegmentationRenderer.renderSegmentationMask(width, height);
 BufferedImage fastMask = SegmentationRenderer.renderSegmentationMaskFast(width, height, 8);
 ```
 
-### Block Color Mapping
+### Block and Entity Color Mapping
 
 ```java
 import com.ggalimi.segmod.util.BlockClassMap;
+import com.ggalimi.segmod.util.EntityClassMap;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EntityType;
 
 // Get RGB color for a block
-int[] color = BlockClassMap.getBlockColor(Blocks.STONE);
+int[] blockColor = BlockClassMap.getBlockColor(Blocks.STONE);
 // Returns: [r, g, b] where each value is 0-255
 
-// Get packed color (0xRRGGBB)
-int packedColor = BlockClassMap.getBlockColorPacked(Blocks.GRASS_BLOCK);
+// Get RGB color for an entity type
+int[] entityColor = EntityClassMap.getEntityTypeColor(EntityType.ZOMBIE);
+// Returns: [r, g, b] where each value is 0-255
+
+// Get packed colors (0xRRGGBB)
+int packedBlockColor = BlockClassMap.getBlockColorPacked(Blocks.GRASS_BLOCK);
+int packedEntityColor = EntityClassMap.getEntityTypeColorPacked(EntityType.PLAYER);
 ```
 
 ### Depth Extraction

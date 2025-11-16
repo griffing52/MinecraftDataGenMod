@@ -1,35 +1,36 @@
 package com.ggalimi.segmod.render;
 
 import com.ggalimi.segmod.util.BlockClassMap;
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.ggalimi.segmod.util.EntityClassMap;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.gl.SimpleFramebuffer;
-import net.minecraft.client.render.*;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.Entity;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Matrix4f;
+import net.minecraft.client.world.ClientWorld;
 
 import java.awt.image.BufferedImage;
+import java.util.List;
+import java.util.Optional;
 
 /**
- * Renders the world with blocks colored by their segmentation class.
- * This creates the segmentation mask where each block type has a unique deterministic color.
+ * Renders the world with blocks and entities colored by their segmentation class.
+ * This creates the segmentation mask where each block type and entity type has a unique deterministic color.
+ * Entities are checked first and take priority over blocks in the segmentation mask.
  */
 public class SegmentationRenderer {
     
     private static final MinecraftClient client = MinecraftClient.getInstance();
     
     /**
-     * Renders a segmentation mask by ray-casting through each pixel and coloring by block type.
+     * Renders a segmentation mask by ray-casting through each pixel and coloring by block/entity type.
      * This is a CPU-based approach suitable for data generation.
      * 
+     * Entities are checked first and take priority over blocks in the segmentation.
      * For better performance, consider implementing a custom shader-based approach.
      * 
      * @param width Width of the output image
@@ -67,17 +68,23 @@ public class SegmentationRenderer {
                 
                 Vec3d rayDir = calculateRayDirection(ndcX, ndcY, pitch, yaw, viewWidth, viewHeight);
                 
-                // Perform raycast
-                HitResult hit = raycast(world, cameraPos, rayDir, 100.0);
+                // Perform raycast with entity detection
+                HitResult hit = raycastWithEntities(world, cameraPos, rayDir, 100.0);
                 
                 int[] color;
-                if (hit.getType() == HitResult.Type.BLOCK) {
+                if (hit.getType() == HitResult.Type.ENTITY) {
+                    // Entity hit - use entity color
+                    EntityHitResult entityHit = (EntityHitResult) hit;
+                    Entity entity = entityHit.getEntity();
+                    color = EntityClassMap.getEntityColor(entity);
+                } else if (hit.getType() == HitResult.Type.BLOCK) {
+                    // Block hit - use block color
                     BlockHitResult blockHit = (BlockHitResult) hit;
                     BlockState state = world.getBlockState(blockHit.getBlockPos());
                     Block block = state.getBlock();
                     color = BlockClassMap.getBlockColor(block);
                 } else {
-                    // Sky or miss - use black or a specific sky color
+                    // Sky or miss - use black
                     color = new int[]{0, 0, 0};
                 }
                 
@@ -144,7 +151,77 @@ public class SegmentationRenderer {
     }
     
     /**
-     * Performs a raycast in the world.
+     * Performs a raycast in the world, checking both entities and blocks.
+     * Entities are checked first and take priority if they're closer.
+     */
+    private static HitResult raycastWithEntities(ClientWorld world, Vec3d origin, Vec3d direction, double maxDistance) {
+        Vec3d end = origin.add(direction.multiply(maxDistance));
+        
+        // First, check for block hits
+        HitResult blockHit = world.raycast(new net.minecraft.world.RaycastContext(
+            origin,
+            end,
+            net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
+            net.minecraft.world.RaycastContext.FluidHandling.NONE,
+            client.player
+        ));
+        
+        double blockDistance = blockHit.getType() != HitResult.Type.MISS 
+            ? blockHit.getPos().distanceTo(origin) 
+            : maxDistance;
+        
+        // Check for entity hits along the ray
+        Optional<EntityHitResult> entityHit = raycastEntity(world, origin, end, blockDistance);
+        
+        // Return entity hit if it's closer than block hit, otherwise return block hit
+        if (entityHit.isPresent()) {
+            return entityHit.get();
+        }
+        return blockHit;
+    }
+    
+    /**
+     * Performs entity raycast along the ray from origin to end.
+     * Only returns entities that are closer than maxDistance.
+     */
+    private static Optional<EntityHitResult> raycastEntity(ClientWorld world, Vec3d origin, Vec3d end, double maxDistance) {
+        Vec3d direction = end.subtract(origin);
+        
+        // Create a bounding box that encompasses the entire ray
+        Box rayBox = new Box(origin, end).expand(1.0);
+        
+        // Get all entities in the box
+        List<Entity> entities = world.getOtherEntities(client.player, rayBox, 
+            entity -> !entity.isSpectator() && entity.canHit());
+        
+        Entity closestEntity = null;
+        Vec3d closestHitPos = null;
+        double closestDistance = maxDistance;
+        
+        // Check each entity for intersection
+        for (Entity entity : entities) {
+            Box entityBox = entity.getBoundingBox().expand(entity.getTargetingMargin());
+            Optional<Vec3d> hitPos = entityBox.raycast(origin, end);
+            
+            if (hitPos.isPresent()) {
+                double distance = origin.distanceTo(hitPos.get());
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestEntity = entity;
+                    closestHitPos = hitPos.get();
+                }
+            }
+        }
+        
+        if (closestEntity != null) {
+            return Optional.of(new EntityHitResult(closestEntity, closestHitPos));
+        }
+        
+        return Optional.empty();
+    }
+    
+    /**
+     * Performs a raycast in the world (blocks only, for backwards compatibility).
      */
     private static HitResult raycast(ClientWorld world, Vec3d origin, Vec3d direction, double maxDistance) {
         Vec3d end = origin.add(direction.multiply(maxDistance));
@@ -158,8 +235,9 @@ public class SegmentationRenderer {
     }
     
     /**
-     * Alternative fast segmentation mask using block sampling (lower quality but faster).
-     * Samples blocks at regular intervals instead of per-pixel raycasting.
+     * Alternative fast segmentation mask using sampling (lower quality but faster).
+     * Samples at regular intervals instead of per-pixel raycasting.
+     * Includes both entities and blocks.
      */
     public static BufferedImage renderSegmentationMaskFast(int width, int height, int sampleRate) {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -186,10 +264,16 @@ public class SegmentationRenderer {
                 float ndcY = 1.0f - (2.0f * y / height);
                 
                 Vec3d rayDir = calculateRayDirection(ndcX, ndcY, pitch, yaw, viewWidth, viewHeight);
-                HitResult hit = raycast(world, cameraPos, rayDir, 100.0);
+                HitResult hit = raycastWithEntities(world, cameraPos, rayDir, 100.0);
                 
                 int[] color;
-                if (hit.getType() == HitResult.Type.BLOCK) {
+                if (hit.getType() == HitResult.Type.ENTITY) {
+                    // Entity hit - use entity color
+                    EntityHitResult entityHit = (EntityHitResult) hit;
+                    Entity entity = entityHit.getEntity();
+                    color = EntityClassMap.getEntityColor(entity);
+                } else if (hit.getType() == HitResult.Type.BLOCK) {
+                    // Block hit - use block color
                     BlockHitResult blockHit = (BlockHitResult) hit;
                     BlockState state = world.getBlockState(blockHit.getBlockPos());
                     Block block = state.getBlock();

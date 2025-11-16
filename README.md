@@ -11,7 +11,9 @@ A client-side Minecraft Fabric mod for generating computer vision training data.
 - ✅ **Client-side only** - No server-side installation required
 - ✅ **Automatic frame capture** - Continuously captures frames while playing
 - ✅ **Manual capture mode** - Capture single frames on demand
+- ✅ **Entity segmentation** - Players, mobs, and items are included with unique colors
 - ✅ **Deterministic block colors** - Each block type gets a unique, consistent RGB color for segmentation
+- ✅ **Deterministic entity colors** - Each entity type gets a unique, consistent RGB color for segmentation
 - ✅ **Linear depth normalization** - Depth maps use linear space for accurate distance representation
 - ✅ **Synchronized outputs** - All three images captured from the same frame
 
@@ -63,9 +65,11 @@ When automatic capture is enabled (press F9):
 Standard screenshots captured from the main framebuffer showing exactly what you see in-game.
 
 ### Segmentation Masks
-Each block type is assigned a unique RGB color based on its registry ID:
-- Colors are **deterministic** - same block type always gets the same color
+Each block type and entity type is assigned a unique RGB color based on its registry ID:
+- Colors are **deterministic** - same block/entity type always gets the same color
 - Uses hash-based color generation to ensure color uniqueness
+- **Entities** (players, mobs, items) are included and take priority over blocks
+- Entity colors use a different algorithm than blocks to minimize collision risk
 - Sky/air is rendered as black (0, 0, 0)
 - Implemented using ray-casting through each pixel
 
@@ -93,6 +97,7 @@ src/client/java/com/ggalimi/segmod/
 │   └── SegmentationRenderer.java     # Segmentation mask generation
 └── util/
     ├── BlockClassMap.java            # Block → Color mapping
+    ├── EntityClassMap.java           # Entity → Color mapping
     └── DepthExtractor.java           # Depth buffer processing
 ```
 
@@ -119,6 +124,12 @@ src/client/java/com/ggalimi/segmod/
 - Uses block registry ID hashing for determinism
 - Caches colors for performance
 
+**EntityClassMap.java**
+- Maps entities to unique RGB colors
+- Uses different hashing algorithm than blocks to avoid collisions
+- Includes all entity types: mobs, players, items, projectiles, etc.
+- Caches colors for performance
+
 ## Building from Source
 
 ```bash
@@ -141,6 +152,7 @@ See LICENSE file for details.
 Contributions welcome! Areas for enhancement:
 - GPU-accelerated segmentation using custom shaders
 - Semantic segmentation classes (e.g., "natural", "artificial", "liquid")
-- Instance segmentation for individual entities
+- Instance segmentation for individual entities (same entity type, different IDs)
+- Entity pose/skeleton information
 - Normal map generation
 - Optical flow between frames 
