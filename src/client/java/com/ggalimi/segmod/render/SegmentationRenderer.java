@@ -255,7 +255,8 @@ public class SegmentationRenderer {
         for (int y = 0; y < height; y += sampleRate) {
             for (int x = 0; x < width; x += sampleRate) {
                 Vec3d rayDir = getRayFromCamera(x, y, width, height);
-                HitResult hit = raycast(world, cameraPos, rayDir, 100.0);
+                // FIX: Use raycastWithEntities instead of raycast to include entities!
+                HitResult hit = raycastWithEntities(world, cameraPos, rayDir, 100.0);
                 
                 int[] color;
                 if (hit.getType() == HitResult.Type.ENTITY) {
