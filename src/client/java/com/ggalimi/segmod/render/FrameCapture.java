@@ -30,6 +30,7 @@ public class FrameCapture {
     private static boolean autoCapture = false;
     private static int captureInterval = 20; // Capture every 20 ticks (1 second at 20 TPS)
     private static int tickCounter = 0;
+    private static boolean captureRequested = false;
     
     static {
         // Initialize output directory
@@ -38,6 +39,13 @@ public class FrameCapture {
         if (!outputDirectory.exists()) {
             outputDirectory.mkdirs();
         }
+    }
+    
+    /**
+     * Request a capture on the next world render.
+     */
+    public static void requestCapture() {
+        captureRequested = true;
     }
     
     /**
@@ -64,27 +72,39 @@ public class FrameCapture {
     }
     
     /**
-     * Called every tick to handle automatic capture.
+     * Called every tick to handle automatic capture timing.
      */
     public static void tick() {
         if (autoCapture && client.world != null && client.player != null) {
             tickCounter++;
             if (tickCounter >= captureInterval) {
                 tickCounter = 0;
-                captureFrame();
+                requestCapture();
             }
         }
     }
     
     /**
+     * Called after world entities are rendered (before HUD).
+     */
+    public static void onWorldRendered(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        if (!captureRequested) {
+            return;
+        }
+        captureRequested = false;
+        captureFrame();
+    }
+    
+    /**
      * Main method to capture all three outputs: RGB, segmentation mask, and depth map.
      */
-    public static void captureFrame() {
+    private static void captureFrame() {
         if (client.world == null || client.player == null) {
             return;
         }
         
         try {
+            // We're called after world render but before HUD, so framebuffer has world-only content
             Framebuffer mainFramebuffer = client.getFramebuffer();
             int width = mainFramebuffer.textureWidth;
             int height = mainFramebuffer.textureHeight;
@@ -92,14 +112,14 @@ public class FrameCapture {
             String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH.mm.ss").format(new Date());
             String frameId = String.format("%s_frame%04d", timestamp, frameCounter);
             
-            // === 1. CAPTURE RGB COLOR IMAGE (normal screenshot) ===
+            // === 1. CAPTURE RGB COLOR IMAGE (world-only, no HUD) ===
             captureRGBImage(mainFramebuffer, width, height, frameId);
+            
+            // === 3. CAPTURE DEPTH MAP ===
+            captureDepthMap(mainFramebuffer, width, height, frameId);
             
             // === 2. CAPTURE SEGMENTATION MASK ===
             captureSegmentationMask(width, height, frameId);
-            
-            // === 3. CAPTURE DEPTH MAP ===
-            captureDepthMap(width, height, frameId);
             
             frameCounter++;
             
@@ -164,16 +184,40 @@ public class FrameCapture {
      * Extracts depth information from the depth buffer and normalizes to linear space.
      * Near objects = black (0), far objects = white (255).
      */
-    private static void captureDepthMap(int width, int height, String frameId) throws IOException {
+    private static void captureDepthMap(Framebuffer framebuffer, int width, int height, String frameId) throws IOException {
         // Get camera parameters
         float nearPlane = 0.05f; // Minecraft's near plane
         float farPlane = client.options.getViewDistance().getValue() * 16.0f; // Render distance in blocks
         
-        // Extract linear depth from OpenGL depth buffer
-        float[] linearDepth = DepthExtractor.extractLinearDepth(width, height, nearPlane, farPlane);
+        // Read depth buffer directly
+        float[] rawDepth = DepthExtractor.extractRawDepth(framebuffer, width, height);
         
-        // Convert to grayscale image
-        byte[] grayscaleData = DepthExtractor.depthToGrayscale(linearDepth);
+        // Debug: Check raw depth statistics
+        float minDepth = Float.MAX_VALUE;
+        float maxDepth = Float.MIN_VALUE;
+        int whitePixels = 0;
+        int blackPixels = 0;
+        int midPixels = 0;
+        for (float d : rawDepth) {
+            if (d < minDepth) minDepth = d;
+            if (d > maxDepth) maxDepth = d;
+            if (d > 0.999f) whitePixels++;
+            else if (d < 0.001f) blackPixels++;
+            else midPixels++;
+        }
+        System.out.println("[SegMod Depth] Min: " + minDepth + ", Max: " + maxDepth + 
+                         ", White: " + whitePixels + ", Black: " + blackPixels + 
+                         ", Mid: " + midPixels + "/" + rawDepth.length);
+        
+        if (midPixels > 0) {
+            System.out.println("[SegMod] Depth data available: " + midPixels + " pixels with valid depth");
+        }
+        
+        // Apply contrast enhancement to make details more visible
+        float[] enhancedDepth = DepthExtractor.enhanceDepthContrast(rawDepth, 0.3f);
+        
+        // Convert to grayscale
+        byte[] grayscaleData = DepthExtractor.depthToGrayscale(enhancedDepth);
         
         // Create BufferedImage from grayscale data
         BufferedImage depthImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -192,6 +236,33 @@ public class FrameCapture {
         // Save depth map
         File outputFile = new File(outputDirectory, frameId + "_depth.png");
         ImageIO.write(depthImage, "PNG", outputFile);
+        
+        // Also save linearized depth for comparison
+        saveLinearizedDepth(framebuffer, width, height, frameId, nearPlane, farPlane);
+    }
+    
+    /**
+     * Helper method to save linearized depth for debugging.
+     */
+    @SuppressWarnings("unused")
+    private static void saveLinearizedDepth(Framebuffer framebuffer, int width, int height, 
+                                           String frameId, float nearPlane, float farPlane) throws IOException {
+        float[] linearDepth = DepthExtractor.extractLinearDepth(framebuffer, width, height, nearPlane, farPlane);
+        byte[] linearGrayscale = DepthExtractor.depthToGrayscale(linearDepth);
+        
+        BufferedImage linearImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int i = (x + y * width) * 3;
+                int r = linearGrayscale[i] & 0xFF;
+                int g = linearGrayscale[i + 1] & 0xFF;
+                int b = linearGrayscale[i + 2] & 0xFF;
+                linearImage.setRGB(x, height - 1 - y, (r << 16) | (g << 8) | b);
+            }
+        }
+        
+        File outputFile = new File(outputDirectory, frameId + "_depth_linear.png");
+        ImageIO.write(linearImage, "PNG", outputFile);
     }
     
     /**

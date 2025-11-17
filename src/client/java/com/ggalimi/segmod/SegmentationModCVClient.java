@@ -4,6 +4,7 @@ import com.ggalimi.segmod.render.FrameCapture;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
@@ -37,19 +38,24 @@ public class SegmentationModCVClient implements ClientModInitializer {
 			"category.segmod"
 		));
 		
-		// Register tick event for automatic capture
+		// Register tick event for keybindings and auto-capture timing
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			// Handle keybindings
 			while (captureFrameKey.wasPressed()) {
-				FrameCapture.captureFrame();
+				FrameCapture.requestCapture();
 			}
 			
 			while (toggleAutoCaptureKey.wasPressed()) {
 				FrameCapture.toggleAutoCapture();
 			}
 			
-			// Process automatic capture
+			// Process automatic capture timing
 			FrameCapture.tick();
+		});
+		
+		// Register world render event to capture after world but before HUD
+		WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+			FrameCapture.onWorldRendered(context);
 		});
 		
 		System.out.println("[SegMod] Frame capture initialized!");
