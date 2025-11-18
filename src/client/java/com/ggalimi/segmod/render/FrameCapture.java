@@ -28,9 +28,10 @@ public class FrameCapture {
     
     // Capture settings
     private static boolean autoCapture = false;
-    private static int captureInterval = 20; // Capture every 20 ticks (1 second at 20 TPS)
+    private static int captureInterval = 150; // Capture every 150 ticks (1 second at 150 TPS)
     private static int tickCounter = 0;
     private static boolean captureRequested = false;
+    private static int segmentationSampleRate = 2; // 1x1 = full res, 2x2 = half res, etc. (4x4 for speed)
     
     static {
         // Initialize output directory
@@ -165,14 +166,15 @@ public class FrameCapture {
     
     /**
      * === PART 2: SEGMENTATION MASK ===
-     * Renders the scene with each block type colored by its unique deterministic color.
-     * Uses ray-casting to determine the block type at each pixel and colors it accordingly.
+     * Renders the scene with each block type and entity colored by its unique deterministic color.
+     * Uses ray-casting to determine the block/entity type at each pixel and colors it accordingly.
+     * Includes all entities (mobs, players, dropped items, etc.)
      */
     private static void captureSegmentationMask(int width, int height, String frameId) throws IOException {
         // Use SegmentationRenderer to create the mask
-        // Using fast mode with 4x4 sampling for better performance
+        // Using fast mode with 2x2 sampling for better entity detection (smaller items like dropped items)
         // For highest quality, use renderSegmentationMask(width, height) instead
-        BufferedImage segMask = SegmentationRenderer.renderSegmentationMaskFast(width, height, 4);
+        BufferedImage segMask = SegmentationRenderer.renderSegmentationMaskFast(width, height, 2);
         
         // Save segmentation mask
         File outputFile = new File(outputDirectory, frameId + "_seg.png");
@@ -261,7 +263,7 @@ public class FrameCapture {
             }
         }
         
-        File outputFile = new File(outputDirectory, frameId + "_depth_linear.png");
+        File outputFile = new File(outputDirectory, frameId + "_depth.png");
         ImageIO.write(linearImage, "PNG", outputFile);
     }
     

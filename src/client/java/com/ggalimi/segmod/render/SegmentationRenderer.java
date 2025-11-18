@@ -159,12 +159,12 @@ public class SegmentationRenderer {
     private static HitResult raycastWithEntities(ClientWorld world, Vec3d origin, Vec3d direction, double maxDistance) {
         Vec3d end = origin.add(direction.multiply(maxDistance));
         
-        // First, check for block hits
+        // First, check for block hits (including fluids like water)
         HitResult blockHit = world.raycast(new net.minecraft.world.RaycastContext(
             origin,
             end,
             net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
-            net.minecraft.world.RaycastContext.FluidHandling.NONE,
+            net.minecraft.world.RaycastContext.FluidHandling.ANY,
             client.player
         ));
         
@@ -185,14 +185,16 @@ public class SegmentationRenderer {
     /**
      * Performs entity raycast along the ray from origin to end.
      * Only returns entities that are closer than maxDistance.
+     * Includes all entities (living entities, dropped items, etc.)
      */
     private static Optional<EntityHitResult> raycastEntity(ClientWorld world, Vec3d origin, Vec3d end, double maxDistance) {
         Vec3d direction = end.subtract(origin);
         
         // Create a bounding box that encompasses the entire ray
-        Box rayBox = new Box(origin, end).expand(1.0);
+        // Expand more to catch small entities like dropped items
+        Box rayBox = new Box(origin, end).expand(2.0);
         
-        // Get all entities in the box
+        // Get all entities in the box - includes ItemEntity (dropped items), mobs, etc.
         List<Entity> entities = world.getOtherEntities(client.player, rayBox, 
             entity -> !entity.isSpectator() && entity.canHit());
         
@@ -202,7 +204,15 @@ public class SegmentationRenderer {
         
         // Check each entity for intersection
         for (Entity entity : entities) {
-            Box entityBox = entity.getBoundingBox().expand(entity.getTargetingMargin());
+            // Expand bounding box slightly more for small entities (like dropped items)
+            // to make them easier to detect in raycasts
+            double expansion = entity.getTargetingMargin();
+            // Give extra margin to small entities (width < 0.5 blocks)
+            if (entity.getWidth() < 0.5) {
+                expansion = Math.max(expansion, 0.3);
+            }
+            
+            Box entityBox = entity.getBoundingBox().expand(expansion);
             Optional<Vec3d> hitPos = entityBox.raycast(origin, end);
             
             if (hitPos.isPresent()) {
@@ -231,7 +241,7 @@ public class SegmentationRenderer {
             origin,
             end,
             net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
-            net.minecraft.world.RaycastContext.FluidHandling.NONE,
+            net.minecraft.world.RaycastContext.FluidHandling.ANY,
             client.player
         ));
     }

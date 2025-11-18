@@ -53,8 +53,9 @@ public class SegmentationModCVClient implements ClientModInitializer {
 			FrameCapture.tick();
 		});
 		
-		// Register world render event to capture after world but before HUD
-		WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+		// Register world render event to capture after translucent blocks (water, glass, etc.) but before HUD
+		// AFTER_TRANSLUCENT ensures water and other transparent blocks are rendered
+		WorldRenderEvents.AFTER_TRANSLUCENT.register(context -> {
 			FrameCapture.onWorldRendered(context);
 		});
 		

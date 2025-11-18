@@ -1,0 +1,1 @@
+cp ./build/libs/* "$env:APPDATA\Roaming\.minecraft\mods"
