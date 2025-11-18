@@ -234,8 +234,8 @@ public class FrameCapture {
         }
         
         // Save depth map
-        File outputFile = new File(outputDirectory, frameId + "_depth.png");
-        ImageIO.write(depthImage, "PNG", outputFile);
+        // File outputFile = new File(outputDirectory, frameId + "_depth.png");
+        // ImageIO.write(depthImage, "PNG", outputFile);
         
         // Also save linearized depth for comparison
         saveLinearizedDepth(framebuffer, width, height, frameId, nearPlane, farPlane);
