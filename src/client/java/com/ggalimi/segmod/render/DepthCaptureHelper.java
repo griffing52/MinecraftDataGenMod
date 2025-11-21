@@ -11,7 +11,6 @@ import net.minecraft.client.gl.Framebuffer;
  */
 public class DepthCaptureHelper {
     
-    private static final MinecraftClient client = MinecraftClient.getInstance();
     private static boolean captureRequested = false;
     private static float[] capturedDepth = null;
     private static int capturedWidth = 0;
@@ -37,6 +36,10 @@ public class DepthCaptureHelper {
         // Capture depth immediately
         try {
             RenderSystem.assertOnRenderThread();
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client == null) {
+                return;
+            }
             Framebuffer framebuffer = client.getFramebuffer();
             capturedWidth = framebuffer.textureWidth;
             capturedHeight = framebuffer.textureHeight;

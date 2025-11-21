@@ -3,7 +3,11 @@
 	"package": "com.ggalimi.segmod.mixin.client",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"ExampleClientMixin"
+		"ExampleClientMixin",
+		"GameRendererMixin",
+		"BlockModelRendererMixin",
+		"EntityRendererMixin",
+		"WorldRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

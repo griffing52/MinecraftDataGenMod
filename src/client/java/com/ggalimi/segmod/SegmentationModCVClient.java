@@ -62,6 +62,6 @@ public class SegmentationModCVClient implements ClientModInitializer {
 		System.out.println("[SegMod] Frame capture initialized!");
 		System.out.println("[SegMod] Press F8 to capture a single frame");
 		System.out.println("[SegMod] Press F9 to toggle automatic capture");
-		System.out.println("[SegMod] Output directory: " + FrameCapture.getOutputDirectory().getAbsolutePath());
+		// Output directory will be created on first capture
 	}
 }

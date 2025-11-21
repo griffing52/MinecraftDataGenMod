@@ -22,9 +22,8 @@ import java.util.Date;
  */
 public class FrameCapture {
     
-    private static final MinecraftClient client = MinecraftClient.getInstance();
     private static int frameCounter = 0;
-    private static File outputDirectory;
+    private static File outputDirectory = null;
     
     // Capture settings
     private static boolean autoCapture = false;
@@ -33,13 +32,19 @@ public class FrameCapture {
     private static boolean captureRequested = false;
     private static int segmentationSampleRate = 2; // 1x1 = full res, 2x2 = half res, etc. (4x4 for speed)
     
-    static {
-        // Initialize output directory
-        File screenshotDir = new File(client.runDirectory, "screenshots");
-        outputDirectory = new File(screenshotDir, "segmod");
-        if (!outputDirectory.exists()) {
-            outputDirectory.mkdirs();
+    /**
+     * Lazily initialize output directory.
+     */
+    public static File getOutputDirectory() {
+        if (outputDirectory == null) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            File screenshotDir = new File(client.runDirectory, "screenshots");
+            outputDirectory = new File(screenshotDir, "segmod");
+            if (!outputDirectory.exists()) {
+                outputDirectory.mkdirs();
+            }
         }
+        return outputDirectory;
     }
     
     /**
@@ -54,6 +59,7 @@ public class FrameCapture {
      */
     public static void setAutoCapture(boolean enabled) {
         autoCapture = enabled;
+        MinecraftClient client = MinecraftClient.getInstance();
         if (enabled) {
             client.inGameHud.getChatHud().addMessage(
                 net.minecraft.text.Text.literal("§a[SegMod] Auto-capture enabled (every " + captureInterval + " ticks)")
@@ -76,7 +82,8 @@ public class FrameCapture {
      * Called every tick to handle automatic capture timing.
      */
     public static void tick() {
-        if (autoCapture && client.world != null && client.player != null) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (autoCapture && client != null && client.world != null && client.player != null) {
             tickCounter++;
             if (tickCounter >= captureInterval) {
                 tickCounter = 0;
@@ -93,14 +100,15 @@ public class FrameCapture {
             return;
         }
         captureRequested = false;
-        captureFrame();
+        captureFrame(context);
     }
     
     /**
      * Main method to capture all three outputs: RGB, segmentation mask, and depth map.
      */
-    private static void captureFrame() {
-        if (client.world == null || client.player == null) {
+    private static void captureFrame(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.world == null || client.player == null) {
             return;
         }
         
@@ -120,7 +128,7 @@ public class FrameCapture {
             captureDepthMap(mainFramebuffer, width, height, frameId);
             
             // === 2. CAPTURE SEGMENTATION MASK ===
-            captureSegmentationMask(width, height, frameId);
+            captureSegmentationMask(width, height, frameId, context);
             
             frameCounter++;
             
@@ -160,24 +168,27 @@ public class FrameCapture {
         }
         
         // Save RGB image
-        File outputFile = new File(outputDirectory, frameId + "_rgb.png");
+        File outputFile = new File(getOutputDirectory(), frameId + "_rgb.png");
         ImageIO.write(image, "PNG", outputFile);
     }
     
     /**
      * === PART 2: SEGMENTATION MASK ===
      * Renders the scene with each block type and entity colored by its unique deterministic color.
-     * Uses ray-casting to determine the block/entity type at each pixel and colors it accordingly.
-     * Includes all entities (mobs, players, dropped items, etc.)
+     * Uses GPU framebuffer rendering with custom shaders for maximum performance and accuracy.
+     * Includes all entities (mobs, players, dropped items, etc.) with actual model geometry.
      */
-    private static void captureSegmentationMask(int width, int height, String frameId) throws IOException {
-        // Use SegmentationRenderer to create the mask
-        // Using fast mode with 2x2 sampling for better entity detection (smaller items like dropped items)
-        // For highest quality, use renderSegmentationMask(width, height) instead
-        BufferedImage segMask = SegmentationRenderer.renderSegmentationMaskFast(width, height, 2);
+    private static void captureSegmentationMask(int width, int height, String frameId, 
+                                                net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) throws IOException {
+        // Use GpuSegmentationRenderer with shader-based rendering
+        long startTime = System.currentTimeMillis();
+        BufferedImage segMask = GpuSegmentationRenderer.renderSegmentationMask(context);
+        long elapsed = System.currentTimeMillis() - startTime;
+        
+        System.out.println("[SegMod] Segmentation rendered in " + elapsed + "ms using GPU");
         
         // Save segmentation mask
-        File outputFile = new File(outputDirectory, frameId + "_seg.png");
+        File outputFile = new File(getOutputDirectory(), frameId + "_seg.png");
         ImageIO.write(segMask, "PNG", outputFile);
     }
     
@@ -187,6 +198,7 @@ public class FrameCapture {
      * Near objects = black (0), far objects = white (255).
      */
     private static void captureDepthMap(Framebuffer framebuffer, int width, int height, String frameId) throws IOException {
+        MinecraftClient client = MinecraftClient.getInstance();
         // Get camera parameters
         float nearPlane = 0.05f; // Minecraft's near plane
         float farPlane = client.options.getViewDistance().getValue() * 16.0f; // Render distance in blocks
@@ -263,7 +275,7 @@ public class FrameCapture {
             }
         }
         
-        File outputFile = new File(outputDirectory, frameId + "_depth.png");
+        File outputFile = new File(getOutputDirectory(), frameId + "_depth.png");
         ImageIO.write(linearImage, "PNG", outputFile);
     }
     
@@ -289,10 +301,5 @@ public class FrameCapture {
         captureInterval = Math.max(1, ticks);
     }
     
-    /**
-     * Gets the output directory.
-     */
-    public static File getOutputDirectory() {
-        return outputDirectory;
-    }
+
 }
