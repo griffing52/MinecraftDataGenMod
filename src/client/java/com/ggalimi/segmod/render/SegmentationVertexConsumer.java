@@ -26,8 +26,19 @@ public class SegmentationVertexConsumer implements VertexConsumer {
     
     @Override
     public VertexConsumer color(int red, int green, int blue, int alpha) {
-        // DEBUG: Force GREEN to verify wrapper is working
-        return delegate.color(0, 255, 0, 255);
+        // Use the current entity/block ID color
+        float[] color = GpuSegmentationRenderer.getCurrentEntityColor();
+        // If no entity, try block
+        if (GpuSegmentationRenderer.getCurrentEntity() == null) {
+            color = GpuSegmentationRenderer.getCurrentBlockColor();
+        }
+        
+        return delegate.color(
+            (int)(color[0] * 255), 
+            (int)(color[1] * 255), 
+            (int)(color[2] * 255), 
+            255
+        );
     }
 
     @Override

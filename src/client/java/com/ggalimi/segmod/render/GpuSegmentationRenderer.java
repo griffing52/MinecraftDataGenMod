@@ -223,6 +223,10 @@ public class GpuSegmentationRenderer {
             // Bind segmentation framebuffer
             long fboStart = System.nanoTime();
             segmentationFbo.clear(MinecraftClient.IS_SYSTEM_MAC);
+            
+            // Copy depth from main framebuffer to allow occlusion by blocks
+            segmentationFbo.copyDepthFrom(mainFbo);
+            
             segmentationFbo.beginWrite(true);
             long fboTime = (System.nanoTime() - fboStart) / 1_000_000;
             System.out.println("[SEGMOD DEBUG] FBO bind took " + fboTime + "ms");
@@ -282,10 +286,12 @@ public class GpuSegmentationRenderer {
         Camera camera = context.camera();
         net.minecraft.client.render.RenderTickCounter tickCounter = context.tickCounter();
         
-        // Setup matrices
-        MatrixStack matrices = new MatrixStack();
-        matrices.multiply(net.minecraft.util.math.RotationAxis.POSITIVE_X.rotationDegrees(camera.getPitch()));
-        matrices.multiply(net.minecraft.util.math.RotationAxis.POSITIVE_Y.rotationDegrees(camera.getYaw() + 180.0F));
+        // Use the matrix stack from the context which matches the player's view
+        MatrixStack matrices = context.matrixStack();
+        matrices.push();
+        
+        // Ensure projection matrix matches the main render
+        // RenderSystem.setProjectionMatrix(context.projectionMatrix(), net.minecraft.client.render.VertexSorter.BY_Z);
         
         // Create our custom provider that forces the segmentation shader
         net.minecraft.client.render.VertexConsumerProvider.Immediate immediate = 
@@ -332,6 +338,8 @@ public class GpuSegmentationRenderer {
         
         // Draw all buffered vertices
         immediate.draw();
+        
+        matrices.pop();
     }
     
     /**
