@@ -21,7 +21,7 @@ public class EntityRenderDispatcherMixin {
     )
     private VertexConsumerProvider wrapVertexConsumerProvider(VertexConsumerProvider original) {
         if (GpuSegmentationRenderer.isSegmentationPass()) {
-            System.out.println("[SEGMOD MIXIN] EntityRenderDispatcher wrapping VertexConsumerProvider");
+            // System.out.println("[SEGMOD MIXIN] EntityRenderDispatcher wrapping VertexConsumerProvider");
             return new SegmentationVertexConsumerProvider(original);
         }
         return original;

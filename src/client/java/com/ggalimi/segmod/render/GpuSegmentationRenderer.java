@@ -213,11 +213,13 @@ public class GpuSegmentationRenderer {
         try {
             // === BEGIN SEGMENTATION PASS ===
             isSegmentationPass = true;
+            setCurrentEntity(null);
+            setCurrentBlock(null);
             blockRenderCount = 0;
             entityRenderCount = 0;
             vertexConsumerWrapCount = 0;
             
-            System.out.println("[SEGMOD DEBUG] Starting GPU segmentation pass");
+            // System.out.println("[SEGMOD DEBUG] Starting GPU segmentation pass");
             long startTime = System.nanoTime();
             
             // Bind segmentation framebuffer
@@ -229,7 +231,7 @@ public class GpuSegmentationRenderer {
             
             segmentationFbo.beginWrite(true);
             long fboTime = (System.nanoTime() - fboStart) / 1_000_000;
-            System.out.println("[SEGMOD DEBUG] FBO bind took " + fboTime + "ms");
+            // System.out.println("[SEGMOD DEBUG] FBO bind took " + fboTime + "ms");
             
             // Set up OpenGL state for segmentation rendering
             RenderSystem.enableDepthTest();
@@ -243,21 +245,21 @@ public class GpuSegmentationRenderer {
             renderWorldSegmentation(context);
             
             long renderTime = (System.nanoTime() - renderStart) / 1_000_000;
-            System.out.println("[SEGMOD DEBUG] World re-render took " + renderTime + "ms");
-            System.out.println("[SEGMOD DEBUG] Blocks rendered: " + blockRenderCount);
-            System.out.println("[SEGMOD DEBUG] Entities rendered: " + entityRenderCount);
-            System.out.println("[SEGMOD DEBUG] Vertex consumers wrapped: " + vertexConsumerWrapCount);
+            // System.out.println("[SEGMOD DEBUG] World re-render took " + renderTime + "ms");
+            // System.out.println("[SEGMOD DEBUG] Blocks rendered: " + blockRenderCount);
+            // System.out.println("[SEGMOD DEBUG] Entities rendered: " + entityRenderCount);
+            // System.out.println("[SEGMOD DEBUG] Vertex consumers wrapped: " + vertexConsumerWrapCount);
             
             // Read pixels from segmentation framebuffer
             long readStart = System.nanoTime();
             BufferedImage result = readFramebufferToImage(segmentationFbo, width, height);
             long readTime = (System.nanoTime() - readStart) / 1_000_000;
-            System.out.println("[SEGMOD DEBUG] Pixel readback took " + readTime + "ms");
+            // System.out.println("[SEGMOD DEBUG] Pixel readback took " + readTime + "ms");
             
             // === END SEGMENTATION PASS ===
             long totalTime = (System.nanoTime() - startTime) / 1_000_000;
-            System.out.println("[SEGMOD DEBUG] TOTAL GPU segmentation took " + totalTime + "ms");
-            System.out.println("[SEGMOD DEBUG] ========================================");
+            // System.out.println("[SEGMOD DEBUG] TOTAL GPU segmentation took " + totalTime + "ms");
+            // System.out.println("[SEGMOD DEBUG] ========================================");
             
             isSegmentationPass = false;
             
@@ -302,6 +304,39 @@ public class GpuSegmentationRenderer {
         double camX = cameraPos.x;
         double camY = cameraPos.y;
         double camZ = cameraPos.z;
+        
+        // === Block Rendering ===
+        net.minecraft.client.render.block.BlockRenderManager blockManager = client.getBlockRenderManager();
+        net.minecraft.util.math.BlockPos.Mutable mutablePos = new net.minecraft.util.math.BlockPos.Mutable();
+        int radius = 16; // Render radius
+        
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    mutablePos.set(camX + x, camY + y, camZ + z);
+                    net.minecraft.block.BlockState state = client.world.getBlockState(mutablePos);
+                    if (!state.isAir()) {
+                        setCurrentBlock(state.getBlock());
+                        matrices.push();
+                        matrices.translate(mutablePos.getX() - camX, mutablePos.getY() - camY, mutablePos.getZ() - camZ);
+                        
+                        // Render block
+                        blockManager.renderBlock(
+                            state, 
+                            mutablePos, 
+                            client.world, 
+                            matrices, 
+                            segProvider.getBuffer(net.minecraft.client.render.RenderLayer.getSolid()), 
+                            true, 
+                            net.minecraft.util.math.random.Random.create(state.getRenderingSeed(mutablePos))
+                        );
+                        
+                        matrices.pop();
+                    }
+                }
+            }
+        }
+        setCurrentBlock(null);
         
         // Manually render all loaded entities
         for (Entity entity : client.world.getEntities()) {

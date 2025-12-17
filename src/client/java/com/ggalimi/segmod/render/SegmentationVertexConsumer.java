@@ -10,7 +10,7 @@ public class SegmentationVertexConsumer implements VertexConsumer {
         this.delegate = delegate;
         this.safeMode = safeMode;
         GpuSegmentationRenderer.incrementVertexConsumerWrapCount();
-        System.out.println("[SEGMOD WRAPPER] Created SegmentationVertexConsumer #" + GpuSegmentationRenderer.getVertexConsumerWrapCount() + " (safeMode=" + safeMode + ")");
+        // System.out.println("[SEGMOD WRAPPER] Created SegmentationVertexConsumer #" + GpuSegmentationRenderer.getVertexConsumerWrapCount() + " (safeMode=" + safeMode + ")");
     }
 
     public SegmentationVertexConsumer(VertexConsumer delegate) {
