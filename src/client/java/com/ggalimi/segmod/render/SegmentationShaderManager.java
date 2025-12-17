@@ -13,6 +13,7 @@ import java.io.IOException;
 public class SegmentationShaderManager {
     private static SegmentationShaderManager instance;
     private ShaderProgram program;
+    private ShaderProgram entityProgram;
 
     public static SegmentationShaderManager getInstance() {
         if (instance == null) {
@@ -25,10 +26,18 @@ public class SegmentationShaderManager {
         System.out.println("[SEGMOD SHADER] Loading segmentation shader");
         // Load "segmod_segmentation" from assets/minecraft/shaders/core/segmod_segmentation.json
         this.program = new ShaderProgram(factory, "segmod_segmentation", VertexFormats.POSITION_TEXTURE_COLOR);
-        System.out.println("[SEGMOD SHADER] Segmentation shader loaded successfully: " + this.program);
+        
+        // Load "segmod_segmentation_entity"
+        this.entityProgram = new ShaderProgram(factory, "segmod_segmentation_entity", VertexFormats.POSITION_COLOR);
+        
+        System.out.println("[SEGMOD SHADER] Segmentation shaders loaded successfully");
     }
 
     public ShaderProgram getProgram() {
         return program;
+    }
+    
+    public ShaderProgram getEntityProgram() {
+        return entityProgram;
     }
 }

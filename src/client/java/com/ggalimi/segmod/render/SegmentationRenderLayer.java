@@ -17,7 +17,7 @@ public class SegmentationRenderLayer extends RenderLayer {
     }
 
     public static RenderLayer getLayer() {
-        System.out.println("[SEGMOD LAYER] Creating SegmentationRenderLayer");
+        // System.out.println("[SEGMOD LAYER] Creating SegmentationRenderLayer");
         RenderLayer layer = RenderLayer.of(
             "segmod_segmentation",
             VertexFormats.POSITION_TEXTURE_COLOR,
@@ -30,10 +30,30 @@ public class SegmentationRenderLayer extends RenderLayer {
                 .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
-                .cull(DISABLE_CULLING)
+                .cull(ENABLE_CULLING) // Enable culling to prevent z-fighting and improve performance
                 .build(false)
         );
-        System.out.println("[SEGMOD LAYER] Created RenderLayer: " + layer);
+        // System.out.println("[SEGMOD LAYER] Created RenderLayer: " + layer);
+        return layer;
+    }
+    
+    public static RenderLayer getEntityLayer() {
+        // System.out.println("[SEGMOD LAYER] Creating SegmentationEntityRenderLayer");
+        RenderLayer layer = RenderLayer.of(
+            "segmod_segmentation_entity",
+            VertexFormats.POSITION_COLOR,
+            VertexFormat.DrawMode.QUADS,
+            256,
+            false,
+            false,
+            RenderLayer.MultiPhaseParameters.builder()
+                .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getEntityProgram()))
+                .transparency(NO_TRANSPARENCY)
+                .writeMaskState(ALL_MASK)
+                .cull(DISABLE_CULLING) // Entities often need double-sided rendering
+                .build(false)
+        );
+        // System.out.println("[SEGMOD LAYER] Created EntityRenderLayer: " + layer);
         return layer;
     }
 }

@@ -312,10 +312,20 @@ public class GpuSegmentationRenderer {
         // TODO: Optimize this to use chunk rendering instead of block iteration for full render distance support
         int radius = 32; // Render radius (blocks)
         
+        // Frustum culling optimization
+        net.minecraft.client.render.Frustum frustum = new net.minecraft.client.render.Frustum(matrices.peek().getPositionMatrix(), context.projectionMatrix());
+        frustum.setPosition(camX, camY, camZ);
+        
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
                     mutablePos.set(camX + x, camY + y, camZ + z);
+                    
+                    // Simple frustum check for the block
+                    if (!frustum.isVisible(new net.minecraft.util.math.Box(mutablePos))) {
+                        continue;
+                    }
+                    
                     net.minecraft.block.BlockState state = client.world.getBlockState(mutablePos);
                     if (!state.isAir()) {
                         setCurrentBlock(state.getBlock());
