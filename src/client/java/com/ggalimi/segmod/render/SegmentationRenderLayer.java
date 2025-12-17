@@ -20,13 +20,14 @@ public class SegmentationRenderLayer extends RenderLayer {
         System.out.println("[SEGMOD LAYER] Creating SegmentationRenderLayer");
         RenderLayer layer = RenderLayer.of(
             "segmod_segmentation",
-            VertexFormats.POSITION_COLOR,
+            VertexFormats.POSITION_TEXTURE_COLOR,
             VertexFormat.DrawMode.QUADS,
             256,
             false,
             false,
             RenderLayer.MultiPhaseParameters.builder()
                 .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getProgram()))
+                .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
                 .cull(DISABLE_CULLING)

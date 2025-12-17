@@ -24,7 +24,7 @@ public class SegmentationShaderManager {
     public void load(ResourceFactory factory) throws IOException {
         System.out.println("[SEGMOD SHADER] Loading segmentation shader");
         // Load "segmod_segmentation" from assets/minecraft/shaders/core/segmod_segmentation.json
-        this.program = new ShaderProgram(factory, "segmod_segmentation", VertexFormats.POSITION_COLOR);
+        this.program = new ShaderProgram(factory, "segmod_segmentation", VertexFormats.POSITION_TEXTURE_COLOR);
         System.out.println("[SEGMOD SHADER] Segmentation shader loaded successfully: " + this.program);
     }
 

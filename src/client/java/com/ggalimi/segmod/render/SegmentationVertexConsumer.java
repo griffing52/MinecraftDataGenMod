@@ -43,7 +43,7 @@ public class SegmentationVertexConsumer implements VertexConsumer {
 
     @Override
     public VertexConsumer texture(float u, float v) {
-        if (safeMode) return this;
+        // Always pass texture coordinates, as we now use POSITION_COLOR_TEXTURE
         return delegate.texture(u, v);
     }
 

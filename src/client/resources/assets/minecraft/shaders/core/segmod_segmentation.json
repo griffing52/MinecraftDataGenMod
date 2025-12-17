@@ -6,7 +6,9 @@
   },
   "vertex": "segmod_segmentation",
   "fragment": "segmod_segmentation",
-  "samplers": [],
+  "samplers": [
+    { "name": "Sampler0" }
+  ],
   "uniforms": [
     {
       "name": "ModelViewMat",

@@ -1,1 +1,2 @@
 cp ./build/libs/* "$env:APPDATA\Roaming\.minecraft\mods"
+cp ./build/libs/* C:\Users\griff\AppData\Roaming\.minecraft\mods\
