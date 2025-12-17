@@ -308,7 +308,9 @@ public class GpuSegmentationRenderer {
         // === Block Rendering ===
         net.minecraft.client.render.block.BlockRenderManager blockManager = client.getBlockRenderManager();
         net.minecraft.util.math.BlockPos.Mutable mutablePos = new net.minecraft.util.math.BlockPos.Mutable();
-        int radius = 16; // Render radius
+        // Increase radius to cover more area, but keep it limited for performance
+        // TODO: Optimize this to use chunk rendering instead of block iteration for full render distance support
+        int radius = 32; // Render radius (blocks)
         
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
