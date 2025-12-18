@@ -53,7 +53,7 @@ public class BlockModelRendererMixin {
     private VertexConsumer wrapVertexConsumer(VertexConsumer original) {
         try {
             if (GpuSegmentationRenderer.isSegmentationPass()) {
-                System.out.println("[SEGMOD MIXIN] BlockModelRendererMixin wrapping VertexConsumer");
+                // System.out.println("[SEGMOD MIXIN] BlockModelRendererMixin wrapping VertexConsumer");
                 GpuSegmentationRenderer.incrementVertexConsumerWrapCount();
                 return new SegmentationVertexConsumer(original);
             }

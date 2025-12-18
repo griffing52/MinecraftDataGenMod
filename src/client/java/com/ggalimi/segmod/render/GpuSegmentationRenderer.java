@@ -279,6 +279,22 @@ public class GpuSegmentationRenderer {
         }
     }
     
+    // Reusable buffer to prevent memory churn/leaks
+    private static net.minecraft.client.util.BufferAllocator bufferAllocator = null;
+    private static net.minecraft.client.render.VertexConsumerProvider.Immediate immediate = null;
+
+    private static void ensureBuffers() {
+        if (bufferAllocator == null) {
+            bufferAllocator = new net.minecraft.client.util.BufferAllocator(256);
+        }
+        if (immediate == null) {
+            immediate = net.minecraft.client.render.VertexConsumerProvider.immediate(bufferAllocator);
+        }
+    }
+
+    // Reflection cache for ChunkInfo access
+    private static java.lang.reflect.Field chunkInfoChunkField = null;
+
     /**
      * Render the world with segmentation colors.
      * This is called during the segmentation pass.
@@ -292,12 +308,10 @@ public class GpuSegmentationRenderer {
         MatrixStack matrices = context.matrixStack();
         matrices.push();
         
-        // Ensure projection matrix matches the main render
-        // RenderSystem.setProjectionMatrix(context.projectionMatrix(), net.minecraft.client.render.VertexSorter.BY_Z);
+        // Ensure buffers are initialized
+        ensureBuffers();
         
         // Create our custom provider that forces the segmentation shader
-        net.minecraft.client.render.VertexConsumerProvider.Immediate immediate = 
-            net.minecraft.client.render.VertexConsumerProvider.immediate(new net.minecraft.client.util.BufferAllocator(256));
         SegmentationVertexConsumerProvider segProvider = new SegmentationVertexConsumerProvider(immediate);
         
         net.minecraft.util.math.Vec3d cameraPos = camera.getPos();
@@ -308,46 +322,237 @@ public class GpuSegmentationRenderer {
         // === Block Rendering ===
         net.minecraft.client.render.block.BlockRenderManager blockManager = client.getBlockRenderManager();
         net.minecraft.util.math.BlockPos.Mutable mutablePos = new net.minecraft.util.math.BlockPos.Mutable();
-        // Increase radius to cover more area, but keep it limited for performance
-        // TODO: Optimize this to use chunk rendering instead of block iteration for full render distance support
-        int radius = 32; // Render radius (blocks)
         
-        // Frustum culling optimization
-        net.minecraft.client.render.Frustum frustum = new net.minecraft.client.render.Frustum(matrices.peek().getPositionMatrix(), context.projectionMatrix());
-        frustum.setPosition(camX, camY, camZ);
+        // MEGA OPTIMIZATION: Use WorldRenderer's visible chunk list
+        // This skips all frustum culling calculations and only iterates chunks that are actually visible
+        com.ggalimi.segmod.mixin.client.WorldRendererAccessor worldRenderer = (com.ggalimi.segmod.mixin.client.WorldRendererAccessor) client.worldRenderer;
         
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    mutablePos.set(camX + x, camY + y, camZ + z);
+        boolean renderedViaChunkInfos = false;
+        
+        try {
+            // Try to get visible chunks from WorldRenderer
+            // We use ObjectArrayList<Object> because ChunkInfo is private/package-private
+            @SuppressWarnings("unchecked")
+            it.unimi.dsi.fastutil.objects.ObjectArrayList<Object> chunkInfos = (it.unimi.dsi.fastutil.objects.ObjectArrayList<Object>) worldRenderer.getChunkInfos();
+            
+            if (chunkInfos != null && !chunkInfos.isEmpty()) {
+                System.out.println("[SEGMOD DEBUG] Found " + chunkInfos.size() + " visible chunks");
+                int chunksProcessed = 0;
+                
+                for (Object info : chunkInfos) {
+                    // Use reflection to get the 'chunk' field from ChunkInfo
+                    if (chunkInfoChunkField == null) {
+                        try {
+                            System.out.println("[SEGMOD DEBUG] Inspecting ChunkInfo fields:");
+                            // Find the field that returns a BuiltChunk
+                            for (java.lang.reflect.Field f : info.getClass().getDeclaredFields()) {
+                                System.out.println("  " + f.getName() + " : " + f.getType().getName());
+                                if (f.getType().getName().contains("BuiltChunk") || 
+                                    f.getType().getName().contains("ChunkBuilder$BuiltChunk") ||
+                                    f.getType().getName().contains("class_846$class_851")) { // Intermediary name for BuiltChunk
+                                    f.setAccessible(true);
+                                    chunkInfoChunkField = f;
+                                    System.out.println("[SEGMOD DEBUG] Found chunk field: " + f.getName());
+                                    break;
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[SEGMOD ERROR] Failed to find chunk field in ChunkInfo: " + e.getMessage());
+                        }
+                    }
                     
-                    // Simple frustum check for the block
-                    if (!frustum.isVisible(new net.minecraft.util.math.Box(mutablePos))) {
+                    if (chunkInfoChunkField == null) {
+                         System.out.println("[SEGMOD DEBUG] chunkInfoChunkField is null, skipping");
+                         continue;
+                    }
+                    
+                    net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk builtChunk = 
+                        (net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) chunkInfoChunkField.get(info);
+                    
+                    // Skip if chunk has no rendered blocks (optimization)
+                    if (builtChunk.getData().isEmpty()) {
+                        // System.out.println("[SEGMOD DEBUG] Chunk empty");
                         continue;
                     }
                     
-                    net.minecraft.block.BlockState state = client.world.getBlockState(mutablePos);
-                    if (!state.isAir()) {
-                        setCurrentBlock(state.getBlock());
-                        matrices.push();
-                        matrices.translate(mutablePos.getX() - camX, mutablePos.getY() - camY, mutablePos.getZ() - camZ);
-                        
-                        // Render block
-                        blockManager.renderBlock(
-                            state, 
-                            mutablePos, 
-                            client.world, 
-                            matrices, 
-                            segProvider.getBuffer(net.minecraft.client.render.RenderLayer.getSolid()), 
-                            true, 
-                            net.minecraft.util.math.random.Random.create(state.getRenderingSeed(mutablePos))
-                        );
-                        
-                        matrices.pop();
+                    net.minecraft.util.math.BlockPos origin = builtChunk.getOrigin();
+                    int minX = origin.getX();
+                    int minY = origin.getY();
+                    int minZ = origin.getZ();
+                    int maxX = minX + 16;
+                    int maxY = minY + 16;
+                    int maxZ = minZ + 16;
+                    
+                    // Iterate blocks in this render chunk (16x16x16)
+                    for (int x = minX; x < maxX; x++) {
+                        for (int y = minY; y < maxY; y++) {
+                            for (int z = minZ; z < maxZ; z++) {
+                                mutablePos.set(x, y, z);
+                                net.minecraft.block.BlockState state = client.world.getBlockState(mutablePos);
+                                
+                                if (!state.isAir()) { // && state.shouldDrawSide(...) - handled by renderBlock
+                                    setCurrentBlock(state.getBlock());
+                                    matrices.push();
+                                    matrices.translate(x - camX, y - camY, z - camZ);
+                                    
+                                    // Render block
+                                    blockManager.renderBlock(
+                                        state, 
+                                        mutablePos, 
+                                        client.world, 
+                                        matrices, 
+                                        segProvider.getBuffer(net.minecraft.client.render.RenderLayer.getSolid()), 
+                                        true, 
+                                        net.minecraft.util.math.random.Random.create(state.getRenderingSeed(mutablePos))
+                                    );
+                                    
+                                    matrices.pop();
+                                }
+                            }
+                        }
                     }
+                    
+                    chunksProcessed++;
+                    // Flush buffer every 4 chunks to manage memory
+                    if (chunksProcessed % 4 == 0) {
+                        // Reset ModelView for draw, then restore
+                        Matrix4f originalModelView = new Matrix4f(RenderSystem.getModelViewMatrix());
+                        RenderSystem.getModelViewMatrix().identity();
+                        RenderSystem.applyModelViewMatrix();
+                        
+                        // Ensure Projection
+                        Matrix4f originalProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
+                        RenderSystem.setProjectionMatrix(context.projectionMatrix(), com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+                        
+                        immediate.draw();
+                        
+                        // Restore
+                        RenderSystem.setProjectionMatrix(originalProjection, com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+                        RenderSystem.getModelViewMatrix().set(originalModelView);
+                        RenderSystem.applyModelViewMatrix();
+                    }
+                }
+                renderedViaChunkInfos = true;
+            }
+            
+            // Final flush
+            // We need to ensure the ModelView matrix is Identity because the vertices are already transformed into View Space
+            // by the MatrixStack passed to renderBlock.
+            // If we don't reset this, the shader will apply the View Matrix AGAIN (Double Transform).
+            Matrix4f originalModelView = new Matrix4f(RenderSystem.getModelViewMatrix());
+            RenderSystem.getModelViewMatrix().identity();
+            RenderSystem.applyModelViewMatrix();
+            
+            // Also ensure Projection Matrix is correct
+            Matrix4f originalProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
+            RenderSystem.setProjectionMatrix(context.projectionMatrix(), com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+            
+            immediate.draw();
+            
+            // Restore matrices
+            RenderSystem.setProjectionMatrix(originalProjection, com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+            RenderSystem.getModelViewMatrix().set(originalModelView);
+            RenderSystem.applyModelViewMatrix();
+            
+        } catch (Exception e) {
+            System.err.println("[SEGMOD ERROR] Failed to access visible chunks: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        // Fallback if Mega Optimization failed
+        if (!renderedViaChunkInfos) {
+            System.out.println("[SEGMOD WARNING] Fallback to radius-based rendering");
+            // Use actual render distance, but clamp it to avoid OOM/Crash on high distances
+            int renderDistance = Math.min(client.options.getClampedViewDistance(), 12);
+            
+            // Frustum culling optimization
+            net.minecraft.client.render.Frustum frustum = new net.minecraft.client.render.Frustum(matrices.peek().getPositionMatrix(), context.projectionMatrix());
+            frustum.setPosition(camX, camY, camZ);
+            
+            net.minecraft.client.world.ClientWorld world = client.world;
+            net.minecraft.util.math.ChunkPos cameraChunkPos = new net.minecraft.util.math.ChunkPos(camera.getBlockPos());
+            
+            for (int cx = -renderDistance; cx <= renderDistance; cx++) {
+                for (int cz = -renderDistance; cz <= renderDistance; cz++) {
+                    int chunkX = cameraChunkPos.x + cx;
+                    int chunkZ = cameraChunkPos.z + cz;
+                    
+                    net.minecraft.world.chunk.WorldChunk chunk = world.getChunk(chunkX, chunkZ);
+                    if (chunk == null || chunk.isEmpty()) continue;
+                    
+                    double minX = chunkX * 16;
+                    double minZ = chunkZ * 16;
+                    double minY = world.getBottomY();
+                    double maxX = minX + 16;
+                    double maxZ = minZ + 16;
+                    double maxY = world.getTopY();
+                    
+                    if (!frustum.isVisible(new net.minecraft.util.math.Box(minX, minY, minZ, maxX, maxY, maxZ))) {
+                        continue;
+                    }
+                    
+                    net.minecraft.world.chunk.ChunkSection[] sections = chunk.getSectionArray();
+                    for (int i = 0; i < sections.length; i++) {
+                        net.minecraft.world.chunk.ChunkSection section = sections[i];
+                        if (section == null || section.isEmpty()) continue;
+                        
+                        int sectionY = world.sectionIndexToCoord(i);
+                        int minSectionY = sectionY * 16;
+                        int maxSectionY = minSectionY + 16;
+                        
+                        if (!frustum.isVisible(new net.minecraft.util.math.Box(minX, minSectionY, minZ, maxX, maxSectionY, maxZ))) {
+                            continue;
+                        }
+                        
+                        for (int x = 0; x < 16; x++) {
+                            for (int y = 0; y < 16; y++) {
+                                for (int z = 0; z < 16; z++) {
+                                    net.minecraft.block.BlockState state = section.getBlockState(x, y, z);
+                                    if (!state.isAir()) {
+                                        int worldX = chunkX * 16 + x;
+                                        int worldY = minSectionY + y;
+                                        int worldZ = chunkZ * 16 + z;
+                                        
+                                        mutablePos.set(worldX, worldY, worldZ);
+                                        
+                                        setCurrentBlock(state.getBlock());
+                                        matrices.push();
+                                        matrices.translate(worldX - camX, worldY - camY, worldZ - camZ);
+                                        
+                                        blockManager.renderBlock(
+                                            state, 
+                                            mutablePos, 
+                                            client.world, 
+                                            matrices, 
+                                            segProvider.getBuffer(net.minecraft.client.render.RenderLayer.getSolid()), 
+                                            true, 
+                                            net.minecraft.util.math.random.Random.create(state.getRenderingSeed(mutablePos))
+                                        );
+                                        
+                                        matrices.pop();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Reset ModelView for draw, then restore (for the fallback loop)
+                    Matrix4f originalModelView = new Matrix4f(RenderSystem.getModelViewMatrix());
+                    RenderSystem.getModelViewMatrix().identity();
+                    RenderSystem.applyModelViewMatrix();
+                    
+                    Matrix4f originalProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
+                    RenderSystem.setProjectionMatrix(context.projectionMatrix(), com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+                    
+                    immediate.draw();
+                    
+                    RenderSystem.setProjectionMatrix(originalProjection, com.mojang.blaze3d.systems.VertexSorter.BY_Z);
+                    RenderSystem.getModelViewMatrix().set(originalModelView);
+                    RenderSystem.applyModelViewMatrix();
                 }
             }
         }
+        
         setCurrentBlock(null);
         
         // Manually render all loaded entities

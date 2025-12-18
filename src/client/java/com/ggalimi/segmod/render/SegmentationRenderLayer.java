@@ -30,7 +30,8 @@ public class SegmentationRenderLayer extends RenderLayer {
                 .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
-                .cull(ENABLE_CULLING) // Enable culling to prevent z-fighting and improve performance
+                .cull(ENABLE_CULLING)
+                .layering(VIEW_OFFSET_Z_LAYERING) // Fix Z-fighting for overlays (e.g. grass)
                 .build(false)
         );
         // System.out.println("[SEGMOD LAYER] Created RenderLayer: " + layer);
@@ -50,7 +51,8 @@ public class SegmentationRenderLayer extends RenderLayer {
                 .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getEntityProgram()))
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
-                .cull(DISABLE_CULLING) // Entities often need double-sided rendering
+                .cull(DISABLE_CULLING)
+                .layering(VIEW_OFFSET_Z_LAYERING) // Fix Z-fighting for entity layers
                 .build(false)
         );
         // System.out.println("[SEGMOD LAYER] Created EntityRenderLayer: " + layer);
