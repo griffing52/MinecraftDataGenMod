@@ -14,6 +14,8 @@ public class SegmentationShaderManager {
     private static SegmentationShaderManager instance;
     private ShaderProgram program;
     private ShaderProgram entityProgram;
+    private ShaderProgram opticalFlowProgram;
+    private ShaderProgram opticalFlowBlockProgram;
 
     public static SegmentationShaderManager getInstance() {
         if (instance == null) {
@@ -30,6 +32,12 @@ public class SegmentationShaderManager {
         // Load "segmod_segmentation_entity"
         this.entityProgram = new ShaderProgram(factory, "segmod_segmentation_entity", VertexFormats.POSITION_COLOR);
         
+        // Load "segmod_optical_flow"
+        this.opticalFlowProgram = new ShaderProgram(factory, "segmod_optical_flow", VertexFormats.POSITION_COLOR);
+
+        // Load "segmod_optical_flow_block"
+        this.opticalFlowBlockProgram = new ShaderProgram(factory, "segmod_optical_flow_block", VertexFormats.POSITION_TEXTURE_COLOR);
+        
         System.out.println("[SEGMOD SHADER] Segmentation shaders loaded successfully");
     }
 
@@ -39,5 +47,13 @@ public class SegmentationShaderManager {
     
     public ShaderProgram getEntityProgram() {
         return entityProgram;
+    }
+    
+    public ShaderProgram getOpticalFlowProgram() {
+        return opticalFlowProgram;
+    }
+
+    public ShaderProgram getOpticalFlowBlockProgram() {
+        return opticalFlowBlockProgram;
     }
 }

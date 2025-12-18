@@ -8,6 +8,59 @@ The core idea is to re-render the visible world into a separate framebuffer usin
 
 This approach is significantly faster than CPU-based raytracing or block iteration because it leverages the GPU's rasterization hardware, which is optimized for exactly this task.
 
+## Output Formats & Assumptions
+
+The mod generates five synchronized image files for each captured frame. Below are the details for processing each format.
+
+### 1. RGB Image (`_rgb.png`)
+*   **Format**: Standard 24-bit RGB PNG.
+*   **Content**: The visual game world as seen by the player.
+*   **Usage**: Input image for the neural network.
+
+### 2. Semantic Segmentation (`_seg.png`)
+*   **Format**: 24-bit RGB PNG (Lossless).
+*   **Content**: Pixel-wise classification of object types (e.g., "Grass Block", "Zombie", "Sky").
+*   **Encoding**: 
+    *   The **Class ID** is encoded directly into the RGB channels.
+    *   `ID = (R << 16) | (G << 8) | B`
+    *   Example: ID 1 (Stone) = RGB(0, 0, 1). ID 255 = RGB(0, 0, 255).
+    *   **Note**: Images will appear as "shades of blue" because most IDs are < 255.
+*   **Processing**: Read the image as a raw byte array. Combine the 3 bytes to recover the integer Class ID.
+
+### 3. Instance Segmentation (`_instance.png`)
+*   **Format**: 24-bit RGB PNG (Lossless).
+*   **Content**: Pixel-wise identification of unique object instances.
+*   **Encoding**:
+    *   The **Entity ID** is encoded directly into the RGB channels.
+    *   `ID = (R << 16) | (G << 8) | B`
+    *   Each specific entity (e.g., "Zombie #42") has a unique ID that persists across frames.
+    *   Blocks generally share a common ID (0 or 1) unless specifically tracked as tile entities.
+*   **Processing**: Same as Semantic Segmentation. Recover the integer Instance ID from RGB.
+
+### 4. Optical Flow (`_flow.png`)
+*   **Format**: 24-bit RGB PNG.
+*   **Content**: Screen-space motion vectors (velocity) for each pixel.
+*   **Encoding**:
+    *   **Red Channel**: X-axis motion (Horizontal).
+    *   **Green Channel**: Y-axis motion (Vertical).
+    *   **Blue Channel**: Unused (0).
+    *   **Zero Motion**: RGB(127, 127, 0) (approx. 0.5, 0.5 in float).
+    *   **Formula**: `PixelValue = (Velocity * 5.0 + 0.5) * 255`
+    *   **Decoding**: `Velocity = ((PixelValue / 255.0) - 0.5) / 5.0`
+*   **Visuals**:
+    *   **Mustard Yellow**: No motion.
+    *   **Red/Green Gradients**: Movement.
+
+### 5. Depth Map (`_depth.png`)
+*   **Format**: 24-bit RGB PNG (Grayscale).
+*   **Content**: Linear distance from the camera plane.
+*   **Encoding**:
+    *   **Grayscale**: R=G=B.
+    *   **Range**: Normalized linear depth [0.0, 1.0].
+    *   **0 (Black)**: Near Plane (0.05 blocks).
+    *   **255 (White)**: Far Plane (Render Distance).
+*   **Processing**: `Depth = PixelValue / 255.0 * (Far - Near) + Near`.
+
 ## The Pipeline
 
 1.  **Initialization**: `GpuSegmentationRenderer.renderSegmentationMask()` is called.

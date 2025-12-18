@@ -32,6 +32,17 @@ public class FrameCapture {
     private static boolean captureRequested = false;
     private static int segmentationSampleRate = 2; // 1x1 = full res, 2x2 = half res, etc. (4x4 for speed)
     
+    // Feature Toggles
+    private static boolean enableSemanticSegmentation = true;
+    private static boolean enableInstanceSegmentation = true;
+    private static boolean enableOpticalFlow = false; // Disabled by default
+    private static boolean enableDepth = true;
+
+    public static void setEnableSemanticSegmentation(boolean enable) { enableSemanticSegmentation = enable; }
+    public static void setEnableInstanceSegmentation(boolean enable) { enableInstanceSegmentation = enable; }
+    public static void setEnableOpticalFlow(boolean enable) { enableOpticalFlow = enable; }
+    public static void setEnableDepth(boolean enable) { enableDepth = enable; }
+
     /**
      * Lazily initialize output directory.
      */
@@ -77,6 +88,23 @@ public class FrameCapture {
     public static void toggleAutoCapture() {
         setAutoCapture(!autoCapture);
     }
+
+    /**
+     * Toggles Optical Flow capture on/off.
+     */
+    public static void toggleOpticalFlow() {
+        enableOpticalFlow = !enableOpticalFlow;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (enableOpticalFlow) {
+            client.inGameHud.getChatHud().addMessage(
+                net.minecraft.text.Text.literal("§a[SegMod] Optical Flow Enabled")
+            );
+        } else {
+            client.inGameHud.getChatHud().addMessage(
+                net.minecraft.text.Text.literal("§c[SegMod] Optical Flow Disabled")
+            );
+        }
+    }
     
     /**
      * Called every tick to handle automatic capture timing.
@@ -104,7 +132,7 @@ public class FrameCapture {
     }
     
     /**
-     * Main method to capture all three outputs: RGB, segmentation mask, and depth map.
+     * Main method to capture all outputs: RGB, segmentation, instance, optical flow, and depth.
      */
     private static void captureFrame(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
@@ -124,11 +152,38 @@ public class FrameCapture {
             // === 1. CAPTURE RGB COLOR IMAGE (world-only, no HUD) ===
             captureRGBImage(mainFramebuffer, width, height, frameId);
             
-            // === 3. CAPTURE DEPTH MAP ===
-            captureDepthMap(mainFramebuffer, width, height, frameId);
+            // === 2. CAPTURE DEPTH MAP ===
+            if (enableDepth) {
+                captureDepthMap(mainFramebuffer, width, height, frameId);
+            }
             
-            // === 2. CAPTURE SEGMENTATION MASK ===
-            captureSegmentationMask(width, height, frameId, context);
+            // === 3. CAPTURE SEMANTIC SEGMENTATION MASK ===
+            if (enableSemanticSegmentation) {
+                captureSegmentationMask(width, height, frameId, context);
+            }
+
+            // === 4. CAPTURE INSTANCE SEGMENTATION MASK ===
+            if (enableInstanceSegmentation) {
+                captureInstanceSegmentation(width, height, frameId, context);
+            }
+
+            // === 5. CAPTURE OPTICAL FLOW ===
+            if (enableOpticalFlow) {
+                captureOpticalFlow(width, height, frameId, context);
+            }
+            
+            // Update matrices for next frame's optical flow
+            // Only update if flow is enabled, otherwise we don't need to track history
+            if (enableOpticalFlow) {
+                GpuSegmentationRenderer.updatePreviousMatrices(
+                    context.matrixStack().peek().getPositionMatrix(), 
+                    context.projectionMatrix()
+                );
+            }
+            GpuSegmentationRenderer.updatePreviousMatrices(
+                context.matrixStack().peek().getPositionMatrix(), 
+                context.projectionMatrix()
+            );
             
             frameCounter++;
             
@@ -203,37 +258,12 @@ public class FrameCapture {
         float nearPlane = 0.05f; // Minecraft's near plane
         float farPlane = client.options.getViewDistance().getValue() * 16.0f; // Render distance in blocks
         
-        // Read depth buffer directly
-        float[] rawDepth = DepthExtractor.extractRawDepth(framebuffer, width, height);
+        // Extract linear depth (0.0 to 1.0)
+        float[] linearDepth = DepthExtractor.extractLinearDepth(framebuffer, width, height, nearPlane, farPlane);
         
-        // Debug: Check raw depth statistics
-        float minDepth = Float.MAX_VALUE;
-        float maxDepth = Float.MIN_VALUE;
-        int whitePixels = 0;
-        int blackPixels = 0;
-        int midPixels = 0;
-        for (float d : rawDepth) {
-            if (d < minDepth) minDepth = d;
-            if (d > maxDepth) maxDepth = d;
-            if (d > 0.999f) whitePixels++;
-            else if (d < 0.001f) blackPixels++;
-            else midPixels++;
-        }
-        System.out.println("[SegMod Depth] Min: " + minDepth + ", Max: " + maxDepth + 
-                         ", White: " + whitePixels + ", Black: " + blackPixels + 
-                         ", Mid: " + midPixels + "/" + rawDepth.length);
+        // Convert to grayscale image
+        byte[] grayscaleData = DepthExtractor.depthToGrayscale(linearDepth);
         
-        if (midPixels > 0) {
-            System.out.println("[SegMod] Depth data available: " + midPixels + " pixels with valid depth");
-        }
-        
-        // Apply contrast enhancement to make details more visible
-        float[] enhancedDepth = DepthExtractor.enhanceDepthContrast(rawDepth, 0.3f);
-        
-        // Convert to grayscale
-        byte[] grayscaleData = DepthExtractor.depthToGrayscale(enhancedDepth);
-        
-        // Create BufferedImage from grayscale data
         BufferedImage depthImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -248,35 +278,8 @@ public class FrameCapture {
         }
         
         // Save depth map
-        // File outputFile = new File(outputDirectory, frameId + "_depth.png");
-        // ImageIO.write(depthImage, "PNG", outputFile);
-        
-        // Also save linearized depth for comparison
-        saveLinearizedDepth(framebuffer, width, height, frameId, nearPlane, farPlane);
-    }
-    
-    /**
-     * Helper method to save linearized depth for debugging.
-     */
-    @SuppressWarnings("unused")
-    private static void saveLinearizedDepth(Framebuffer framebuffer, int width, int height, 
-                                           String frameId, float nearPlane, float farPlane) throws IOException {
-        float[] linearDepth = DepthExtractor.extractLinearDepth(framebuffer, width, height, nearPlane, farPlane);
-        byte[] linearGrayscale = DepthExtractor.depthToGrayscale(linearDepth);
-        
-        BufferedImage linearImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int i = (x + y * width) * 3;
-                int r = linearGrayscale[i] & 0xFF;
-                int g = linearGrayscale[i + 1] & 0xFF;
-                int b = linearGrayscale[i + 2] & 0xFF;
-                linearImage.setRGB(x, height - 1 - y, (r << 16) | (g << 8) | b);
-            }
-        }
-        
         File outputFile = new File(getOutputDirectory(), frameId + "_depth.png");
-        ImageIO.write(linearImage, "PNG", outputFile);
+        ImageIO.write(depthImage, "PNG", outputFile);
     }
     
     /**
@@ -300,6 +303,36 @@ public class FrameCapture {
     public static void setCaptureInterval(int ticks) {
         captureInterval = Math.max(1, ticks);
     }
-    
 
+    /**
+     * === PART 4: INSTANCE SEGMENTATION ===
+     * Renders the scene with each entity colored by its unique instance ID.
+     */
+    private static void captureInstanceSegmentation(int width, int height, String frameId, 
+                                                net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) throws IOException {
+        long startTime = System.currentTimeMillis();
+        BufferedImage instanceMask = GpuSegmentationRenderer.renderInstanceSegmentation(context);
+        long elapsed = System.currentTimeMillis() - startTime;
+        
+        System.out.println("[SegMod] Instance Segmentation rendered in " + elapsed + "ms using GPU");
+        
+        File outputFile = new File(getOutputDirectory(), frameId + "_instance.png");
+        ImageIO.write(instanceMask, "PNG", outputFile);
+    }
+
+    /**
+     * === PART 5: OPTICAL FLOW ===
+     * Renders the scene with motion vectors encoded in color channels.
+     */
+    private static void captureOpticalFlow(int width, int height, String frameId, 
+                                                net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) throws IOException {
+        long startTime = System.currentTimeMillis();
+        BufferedImage flowMap = GpuSegmentationRenderer.renderOpticalFlow(context);
+        long elapsed = System.currentTimeMillis() - startTime;
+        
+        System.out.println("[SegMod] Optical Flow rendered in " + elapsed + "ms using GPU");
+        
+        File outputFile = new File(getOutputDirectory(), frameId + "_flow.png");
+        ImageIO.write(flowMap, "PNG", outputFile);
+    }
 }

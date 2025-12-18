@@ -26,7 +26,12 @@ public class SegmentationRenderLayer extends RenderLayer {
             false,
             false,
             RenderLayer.MultiPhaseParameters.builder()
-                .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getProgram()))
+                .program(new RenderPhase.ShaderProgram(() -> {
+                    if (GpuSegmentationRenderer.getRenderMode() == GpuSegmentationRenderer.RenderMode.OPTICAL_FLOW) {
+                        return SegmentationShaderManager.getInstance().getOpticalFlowBlockProgram();
+                    }
+                    return SegmentationShaderManager.getInstance().getProgram();
+                }))
                 .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
@@ -48,7 +53,12 @@ public class SegmentationRenderLayer extends RenderLayer {
             false,
             false,
             RenderLayer.MultiPhaseParameters.builder()
-                .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getEntityProgram()))
+                .program(new RenderPhase.ShaderProgram(() -> {
+                    if (GpuSegmentationRenderer.getRenderMode() == GpuSegmentationRenderer.RenderMode.OPTICAL_FLOW) {
+                        return SegmentationShaderManager.getInstance().getOpticalFlowProgram();
+                    }
+                    return SegmentationShaderManager.getInstance().getEntityProgram();
+                }))
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
                 .cull(ENABLE_CULLING)
@@ -68,7 +78,12 @@ public class SegmentationRenderLayer extends RenderLayer {
             false,
             false,
             RenderLayer.MultiPhaseParameters.builder()
-                .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getProgram()))
+                .program(new RenderPhase.ShaderProgram(() -> {
+                    if (GpuSegmentationRenderer.getRenderMode() == GpuSegmentationRenderer.RenderMode.OPTICAL_FLOW) {
+                        return SegmentationShaderManager.getInstance().getOpticalFlowBlockProgram();
+                    }
+                    return SegmentationShaderManager.getInstance().getProgram();
+                }))
                 .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)

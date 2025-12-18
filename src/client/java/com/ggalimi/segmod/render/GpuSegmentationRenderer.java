@@ -41,6 +41,22 @@ public class GpuSegmentationRenderer {
     private static int entityRenderCount = 0;
     private static int vertexConsumerWrapCount = 0;
 
+    public enum RenderMode {
+        SEMANTIC,
+        INSTANCE,
+        OPTICAL_FLOW
+    }
+
+    private static RenderMode currentRenderMode = RenderMode.SEMANTIC;
+
+    public static void setRenderMode(RenderMode mode) {
+        currentRenderMode = mode;
+    }
+
+    public static RenderMode getRenderMode() {
+        return currentRenderMode;
+    }
+
     /**
      * Get the current global segmentation color.
      */
@@ -84,6 +100,20 @@ public class GpuSegmentationRenderer {
         }
     }
     
+    // Optical Flow Matrices
+    private static Matrix4f prevModelViewMatrix = new Matrix4f();
+    private static Matrix4f prevProjectionMatrix = new Matrix4f();
+    private static boolean hasPrevMatrices = false;
+
+    /**
+     * Update the previous matrices. Call this at the END of the frame.
+     */
+    public static void updatePreviousMatrices(Matrix4f modelView, Matrix4f projection) {
+        prevModelViewMatrix.set(modelView);
+        prevProjectionMatrix.set(projection);
+        hasPrevMatrices = true;
+    }
+
     /**
      * Check if we're currently in the segmentation rendering pass.
      */
@@ -162,7 +192,22 @@ public class GpuSegmentationRenderer {
         if (currentBlock == null) {
             return new float[]{0.0f, 0.0f, 0.0f, 1.0f};
         }
-        int[] rgb = BlockClassMap.getBlockColor(currentBlock);
+        
+        if (currentRenderMode == RenderMode.INSTANCE) {
+            // Blocks are background (0) in instance mode
+            return new float[]{0.0f, 0.0f, 0.0f, 1.0f};
+        }
+        
+        // Semantic Mode: Use deterministic ID
+        int id = com.ggalimi.segmod.util.SegmentationIdMap.getBlockId(currentBlock);
+        // If ID is 0 (unknown), fallback to hash or just 0
+        if (id == 0) {
+             // Fallback to old visual hash if not found (or just return 0)
+             int[] rgb = BlockClassMap.getBlockColor(currentBlock);
+             return new float[]{rgb[0]/255f, rgb[1]/255f, rgb[2]/255f, 1f};
+        }
+        
+        int[] rgb = com.ggalimi.segmod.util.SegmentationIdMap.idToRgb(id);
         return new float[]{
             rgb[0] / 255.0f,
             rgb[1] / 255.0f,
@@ -178,7 +223,17 @@ public class GpuSegmentationRenderer {
         if (currentEntity == null) {
             return new float[]{0.0f, 0.0f, 0.0f, 1.0f};
         }
-        int[] rgb = EntityClassMap.getEntityColor(currentEntity);
+        
+        int id;
+        if (currentRenderMode == RenderMode.INSTANCE) {
+            // Instance Mode: Use unique Entity ID
+            id = currentEntity.getId();
+        } else {
+            // Semantic Mode: Use EntityType ID
+            id = com.ggalimi.segmod.util.SegmentationIdMap.getEntityTypeId(currentEntity.getType());
+        }
+        
+        int[] rgb = com.ggalimi.segmod.util.SegmentationIdMap.idToRgb(id);
         return new float[]{
             rgb[0] / 255.0f,
             rgb[1] / 255.0f,
@@ -195,6 +250,9 @@ public class GpuSegmentationRenderer {
      * @return BufferedImage containing the segmentation mask
      */
     public static BufferedImage renderSegmentationMask(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        // Ensure IDs are initialized
+        com.ggalimi.segmod.util.SegmentationIdMap.init();
+        
         RenderSystem.assertOnRenderThread();
         
         MinecraftClient client = MinecraftClient.getInstance();
@@ -280,6 +338,46 @@ public class GpuSegmentationRenderer {
         }
     }
     
+    public static BufferedImage renderInstanceSegmentation(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        RenderMode prevMode = currentRenderMode;
+        setRenderMode(RenderMode.INSTANCE);
+        try {
+            return renderSegmentationMask(context);
+        } finally {
+            setRenderMode(prevMode);
+        }
+    }
+    
+    public static BufferedImage renderOpticalFlow(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        RenderMode prevMode = currentRenderMode;
+        setRenderMode(RenderMode.OPTICAL_FLOW);
+        
+        // If we don't have previous matrices, we can't calculate flow. Return black.
+        if (!hasPrevMatrices) {
+            return new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        }
+        
+        try {
+            // Upload uniforms to the shader
+            net.minecraft.client.gl.ShaderProgram program = SegmentationShaderManager.getInstance().getOpticalFlowProgram();
+            if (program != null) {
+                // Note: We need to access the uniforms. 
+                // Since ShaderProgram uniforms are protected/internal, we might need to bind them manually 
+                // or rely on the fact that we can't easily set them from here without an accessor.
+                // However, for this implementation, we will assume we can set them via the program's uniform methods if available,
+                // or we might need to use GL calls directly if the abstraction is too strict.
+                
+                // For now, let's try to use the GlUniform if accessible, or raw GL.
+                // Minecraft's ShaderProgram doesn't expose uniforms easily.
+                // We will use a custom binder in renderWorldSegmentation.
+            }
+            
+            return renderSegmentationMask(context);
+        } finally {
+            setRenderMode(prevMode);
+        }
+    }
+
     // Reusable buffer to prevent memory churn/leaks
     private static net.minecraft.client.util.BufferAllocator bufferAllocator = null;
     private static net.minecraft.client.render.VertexConsumerProvider.Immediate immediate = null;
@@ -314,6 +412,38 @@ public class GpuSegmentationRenderer {
         
         // Create our custom provider that forces the segmentation shader
         SegmentationVertexConsumerProvider segProvider = new SegmentationVertexConsumerProvider(immediate);
+        
+        // Bind Optical Flow Uniforms if needed
+        if (currentRenderMode == RenderMode.OPTICAL_FLOW && hasPrevMatrices) {
+            // Calculate Reprojection Matrix: PrevView * InvCurrView
+            // This allows us to reproject the current view-space position back to previous view-space
+            // regardless of the Model matrix (assuming Model matrix is constant, i.e. static geometry)
+            
+            // Get Current View Matrix (from RenderSystem, which should match context.matrixStack)
+            Matrix4f currView = new Matrix4f(RenderSystem.getModelViewMatrix());
+            Matrix4f invCurrView = new Matrix4f(currView).invert();
+            
+            Matrix4f reprojectionMat = new Matrix4f(prevModelViewMatrix); // PrevView
+            reprojectionMat.mul(invCurrView); // PrevView * InvCurrView
+            
+            // Bind for Entity Program
+            net.minecraft.client.gl.ShaderProgram program = SegmentationShaderManager.getInstance().getOpticalFlowProgram();
+            if (program != null) {
+                program.bind();
+                uploadMatrix(program, "ReprojectionMat", reprojectionMat);
+                uploadMatrix(program, "PrevProjMat", prevProjectionMatrix);
+                program.unbind();
+            }
+            
+            // Bind for Block Program
+            net.minecraft.client.gl.ShaderProgram blockProgram = SegmentationShaderManager.getInstance().getOpticalFlowBlockProgram();
+            if (blockProgram != null) {
+                blockProgram.bind();
+                uploadMatrix(blockProgram, "ReprojectionMat", reprojectionMat);
+                uploadMatrix(blockProgram, "PrevProjMat", prevProjectionMatrix);
+                blockProgram.unbind();
+            }
+        }
         
         net.minecraft.util.math.Vec3d cameraPos = camera.getPos();
         double camX = cameraPos.x;
@@ -631,8 +761,63 @@ public class GpuSegmentationRenderer {
         immediate.draw();
         
         matrices.pop();
+        
+        // Update previous matrices for Optical Flow (if this was a normal segmentation pass)
+        // REMOVED: This was causing the "Previous" matrices to be overwritten by the "Current" matrices
+        // before the Optical Flow pass could run (since captureSegmentationMask runs before captureOpticalFlow).
+        // The matrices are now updated explicitly by FrameCapture at the end of the frame.
+        /*
+        if (currentRenderMode == RenderMode.SEMANTIC) {
+            updatePreviousMatrices(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix());
+        }
+        */
     }
     
+    private static void uploadMatrix(net.minecraft.client.gl.ShaderProgram program, String name, Matrix4f matrix) {
+        net.minecraft.client.gl.GlUniform uniform = program.getUniform(name);
+        if (uniform != null) {
+            uniform.set(matrix);
+            uniform.upload();
+        }
+    }
+
+    /**
+     * Read the depth buffer from the segmentation framebuffer.
+     * Returns a float array of linear depth values (in meters).
+     */
+    public static float[] readDepthBuffer(int width, int height, float zNear, float zFar) {
+        RenderSystem.assertOnRenderThread();
+        
+        if (segmentationFbo == null) return new float[0];
+        
+        segmentationFbo.beginRead();
+        
+        ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 4); // 4 bytes per float
+        GL11.glReadPixels(0, 0, width, height, GL11.GL_DEPTH_COMPONENT, GL11.GL_FLOAT, buffer);
+        
+        segmentationFbo.endRead();
+        
+        float[] linearDepth = new float[width * height];
+        
+        for (int i = 0; i < width * height; i++) {
+            float z_b = buffer.getFloat(i * 4);
+            
+            // Linearize depth
+            // z_lin = (2.0 * zNear * zFar) / (zFar + zNear - (2.0 * z_b - 1.0) * (zFar - zNear));
+            float z_ndc = 2.0f * z_b - 1.0f;
+            float z_lin = (2.0f * zNear * zFar) / (zFar + zNear - z_ndc * (zFar - zNear));
+            
+            // Flip vertically to match image coordinates
+            int x = i % width;
+            int y = i / width;
+            int flippedIndex = x + (height - 1 - y) * width;
+            
+            linearDepth[flippedIndex] = z_lin;
+        }
+        
+        return linearDepth;
+    }
+
     /**
      * Read the segmentation framebuffer into a BufferedImage.
      */

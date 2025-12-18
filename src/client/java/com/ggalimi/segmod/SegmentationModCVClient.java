@@ -18,6 +18,7 @@ public class SegmentationModCVClient implements ClientModInitializer {
 	// Keybindings
 	private static KeyBinding captureFrameKey;
 	private static KeyBinding toggleAutoCaptureKey;
+	private static KeyBinding toggleOpticalFlowKey;
 	
 	@Override
 	public void onInitializeClient() {
@@ -37,6 +38,13 @@ public class SegmentationModCVClient implements ClientModInitializer {
 			GLFW.GLFW_KEY_F9, // F9 to toggle automatic capture
 			"category.segmod"
 		));
+
+		toggleOpticalFlowKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+			"key.segmod.toggle_optical_flow",
+			InputUtil.Type.KEYSYM,
+			GLFW.GLFW_KEY_F10, // F10 to toggle optical flow
+			"category.segmod"
+		));
 		
 		// Register tick event for keybindings and auto-capture timing
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -47,6 +55,10 @@ public class SegmentationModCVClient implements ClientModInitializer {
 			
 			while (toggleAutoCaptureKey.wasPressed()) {
 				FrameCapture.toggleAutoCapture();
+			}
+
+			while (toggleOpticalFlowKey.wasPressed()) {
+				FrameCapture.toggleOpticalFlow();
 			}
 			
 			// Process automatic capture timing
