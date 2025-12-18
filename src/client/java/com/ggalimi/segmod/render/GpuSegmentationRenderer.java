@@ -237,7 +237,8 @@ public class GpuSegmentationRenderer {
             RenderSystem.enableDepthTest();
             RenderSystem.depthMask(true);
             RenderSystem.disableBlend();
-            RenderSystem.disableCull(); // Render all faces
+            // RenderSystem.disableCull(); // Render all faces - DISABLED to fix z-fighting/erosion artifacts
+            RenderSystem.enableCull(); // Ensure culling is enabled for solid objects
             
             // Re-render the world with segmentation shader
             // This will trigger our mixins to use segmentation colors
@@ -341,15 +342,25 @@ public class GpuSegmentationRenderer {
                 boolean fieldLookupFailed = false;
                 
                 for (Object info : chunkInfos) {
-                    // Use reflection to get the 'chunk' field from ChunkInfo
-                    if (chunkInfoChunkField == null) {
+                    net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk builtChunk = null;
+
+                    // Check if info IS the BuiltChunk (seems to be the case in some versions/mappings)
+                    if (info instanceof net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) {
+                        builtChunk = (net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) info;
+                    } 
+                    // Otherwise use reflection to get the 'chunk' field from ChunkInfo
+                    else if (chunkInfoChunkField == null) {
                         if (fieldLookupFailed) break; // Don't keep trying if we already failed
                         
                         try {
                             // Dynamic search for BuiltChunk field by checking values
+                            // System.out.println("[SEGMOD DEBUG] Inspecting ChunkInfo class: " + info.getClass().getName());
                             for (java.lang.reflect.Field f : info.getClass().getDeclaredFields()) {
                                 f.setAccessible(true);
                                 Object val = f.get(info);
+                                // String valType = val == null ? "null" : val.getClass().getName();
+                                // System.out.println("[SEGMOD DEBUG] Field: " + f.getName() + " Type: " + f.getType().getName() + " ValueType: " + valType);
+                                
                                 if (val instanceof net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) {
                                     chunkInfoChunkField = f;
                                     System.out.println("[SEGMOD DEBUG] Found BuiltChunk field via value: " + f.getName());
@@ -384,10 +395,18 @@ public class GpuSegmentationRenderer {
                         }
                     }
                     
-                    if (chunkInfoChunkField == null) continue;
+                    if (builtChunk == null && chunkInfoChunkField != null) {
+                        try {
+                            builtChunk = (net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) chunkInfoChunkField.get(info);
+                        } catch (Exception e) {
+                            continue;
+                        }
+                    }
+
+                    if (builtChunk == null) continue;
                     
-                    net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk builtChunk = 
-                        (net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) chunkInfoChunkField.get(info);
+                    // Skip if chunk has no rendered blocks (optimization)
+                    if (builtChunk.getData().isEmpty()) continue;
                     
                     // Skip if chunk has no rendered blocks (optimization)
                     if (builtChunk.getData().isEmpty()) continue;
