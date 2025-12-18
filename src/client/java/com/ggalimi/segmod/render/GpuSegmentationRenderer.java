@@ -336,44 +336,61 @@ public class GpuSegmentationRenderer {
             it.unimi.dsi.fastutil.objects.ObjectArrayList<Object> chunkInfos = (it.unimi.dsi.fastutil.objects.ObjectArrayList<Object>) worldRenderer.getChunkInfos();
             
             if (chunkInfos != null && !chunkInfos.isEmpty()) {
-                System.out.println("[SEGMOD DEBUG] Found " + chunkInfos.size() + " visible chunks");
+                // System.out.println("[SEGMOD DEBUG] Found " + chunkInfos.size() + " chunk infos");
                 int chunksProcessed = 0;
+                boolean fieldLookupFailed = false;
                 
                 for (Object info : chunkInfos) {
                     // Use reflection to get the 'chunk' field from ChunkInfo
                     if (chunkInfoChunkField == null) {
+                        if (fieldLookupFailed) break; // Don't keep trying if we already failed
+                        
                         try {
-                            System.out.println("[SEGMOD DEBUG] Inspecting ChunkInfo fields:");
-                            // Find the field that returns a BuiltChunk
+                            // Dynamic search for BuiltChunk field by checking values
                             for (java.lang.reflect.Field f : info.getClass().getDeclaredFields()) {
-                                System.out.println("  " + f.getName() + " : " + f.getType().getName());
-                                if (f.getType().getName().contains("BuiltChunk") || 
-                                    f.getType().getName().contains("ChunkBuilder$BuiltChunk") ||
-                                    f.getType().getName().contains("class_846$class_851")) { // Intermediary name for BuiltChunk
-                                    f.setAccessible(true);
+                                f.setAccessible(true);
+                                Object val = f.get(info);
+                                if (val instanceof net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) {
                                     chunkInfoChunkField = f;
-                                    System.out.println("[SEGMOD DEBUG] Found chunk field: " + f.getName());
+                                    System.out.println("[SEGMOD DEBUG] Found BuiltChunk field via value: " + f.getName());
                                     break;
                                 }
                             }
+                            
+                            // If not found, check for outer instance (this$0) if ChunkInfo is an inner class
+                            if (chunkInfoChunkField == null) {
+                                 for (java.lang.reflect.Field f : info.getClass().getDeclaredFields()) {
+                                     if (f.getName().startsWith("this$") || f.getName().startsWith("field_")) {
+                                         f.setAccessible(true);
+                                         Object val = f.get(info);
+                                         if (val instanceof net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) {
+                                             chunkInfoChunkField = f;
+                                             System.out.println("[SEGMOD DEBUG] Found BuiltChunk outer ref: " + f.getName());
+                                             break;
+                                         }
+                                     }
+                                 }
+                            }
+                            
+                            if (chunkInfoChunkField == null) {
+                                System.err.println("[SEGMOD ERROR] Could not find BuiltChunk field in ChunkInfo. Disabling optimization.");
+                                fieldLookupFailed = true;
+                                break;
+                            }
                         } catch (Exception e) {
                             System.err.println("[SEGMOD ERROR] Failed to find chunk field in ChunkInfo: " + e.getMessage());
+                            fieldLookupFailed = true;
+                            break;
                         }
                     }
                     
-                    if (chunkInfoChunkField == null) {
-                         System.out.println("[SEGMOD DEBUG] chunkInfoChunkField is null, skipping");
-                         continue;
-                    }
+                    if (chunkInfoChunkField == null) continue;
                     
                     net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk builtChunk = 
                         (net.minecraft.client.render.chunk.ChunkBuilder.BuiltChunk) chunkInfoChunkField.get(info);
                     
                     // Skip if chunk has no rendered blocks (optimization)
-                    if (builtChunk.getData().isEmpty()) {
-                        // System.out.println("[SEGMOD DEBUG] Chunk empty");
-                        continue;
-                    }
+                    if (builtChunk.getData().isEmpty()) continue;
                     
                     net.minecraft.util.math.BlockPos origin = builtChunk.getOrigin();
                     int minX = origin.getX();
@@ -432,7 +449,10 @@ public class GpuSegmentationRenderer {
                         RenderSystem.applyModelViewMatrix();
                     }
                 }
-                renderedViaChunkInfos = true;
+                
+                if (!fieldLookupFailed) {
+                    renderedViaChunkInfos = true;
+                }
             }
             
             // Final flush

@@ -30,6 +30,12 @@ public class SegmentationVertexConsumerProvider implements VertexConsumerProvide
         boolean safeMode;
         
         String layerStr = layer.toString();
+        
+        // Suppress shadows
+        if (layerStr.contains("shadow")) {
+            return NoOpVertexConsumer.INSTANCE;
+        }
+        
         if (layerStr.contains("solid") || layerStr.contains("cutout") || layerStr.contains("translucent")) {
              // Block layer
              targetLayer = SegmentationRenderLayer.getLayer();
