@@ -58,4 +58,24 @@ public class SegmentationRenderLayer extends RenderLayer {
         // System.out.println("[SEGMOD LAYER] Created EntityRenderLayer: " + layer);
         return layer;
     }
+
+    public static RenderLayer getCutoutLayer() {
+        RenderLayer layer = RenderLayer.of(
+            "segmod_segmentation_cutout",
+            VertexFormats.POSITION_TEXTURE_COLOR,
+            VertexFormat.DrawMode.QUADS,
+            256,
+            false,
+            false,
+            RenderLayer.MultiPhaseParameters.builder()
+                .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getProgram()))
+                .texture(MIPMAP_BLOCK_ATLAS_TEXTURE)
+                .transparency(NO_TRANSPARENCY)
+                .writeMaskState(ALL_MASK)
+                .cull(DISABLE_CULLING) // Disable culling for items (billboards)
+                .layering(NO_LAYERING)
+                .build(false)
+        );
+        return layer;
+    }
 }

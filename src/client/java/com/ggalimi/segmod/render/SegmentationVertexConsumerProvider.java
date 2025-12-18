@@ -36,17 +36,39 @@ public class SegmentationVertexConsumerProvider implements VertexConsumerProvide
             return NoOpVertexConsumer.INSTANCE;
         }
         
-        // Check for entity layers first!
-        // Entity layers often contain "cutout" or "solid" in their name (e.g. "entity_cutout"),
-        // so we must check for "entity" before checking for generic "cutout"/"solid".
-        if (layerStr.contains("entity")) {
-             // Entity layer
+        // Smart Layer Detection
+        boolean isEntityCutout = layerStr.contains("entity_cutout") || layerStr.contains("entity_translucent");
+        boolean isMobTexture = layerStr.contains("textures/entity/");
+        
+        // Debug print removed
+        
+        if (isEntityCutout && !isMobTexture) {
+             // Dropped Items (e.g. Egg, Sapling) or other non-mob entities
+             // Use CutoutLayer: Block Shader (Alpha Test) + No Culling
+             // This ensures the transparent parts of the item sprite are discarded
+             targetLayer = SegmentationRenderLayer.getCutoutLayer();
+             safeMode = false; 
+        } else if (layerStr.contains("entity")) {
+             // Mobs (Spider, Zombie, etc.) - identified by "textures/entity/" OR "entity_solid"
+             // Use EntityLayer: Solid Color Shader (No Texture)
+             // This ensures they render as solid shapes without erosion
              targetLayer = SegmentationRenderLayer.getEntityLayer();
-             safeMode = true; // Entity shader doesn't use texture coords
+             safeMode = true; 
         } else if (layerStr.contains("solid") || layerStr.contains("cutout") || layerStr.contains("translucent")) {
-             // Block layer (only if not an entity layer)
+             // Dropped Items (use Block Atlas but are Entities)
+             // Use CutoutLayer: Block Shader (Alpha Test) + No Culling
+             targetLayer = SegmentationRenderLayer.getCutoutLayer();
+             safeMode = false; 
+        } else if (layerStr.contains("entity")) {
+             // Mobs/Players (Use specific entity textures)
+             // Use EntityLayer: Solid Color Shader (No Texture)
+             targetLayer = SegmentationRenderLayer.getEntityLayer();
+             safeMode = true; 
+        } else if (layerStr.contains("solid") || layerStr.contains("cutout") || layerStr.contains("translucent")) {
+             // Standard Blocks
+             // Use Standard Layer: Block Shader (Alpha Test) + Culling
              targetLayer = SegmentationRenderLayer.getLayer();
-             safeMode = false; // We need texture coords for blocks
+             safeMode = false; 
         } else {
              // Fallback (likely an entity or other non-block item)
              targetLayer = SegmentationRenderLayer.getEntityLayer();
