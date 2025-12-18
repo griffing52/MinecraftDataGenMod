@@ -51,8 +51,8 @@ public class SegmentationRenderLayer extends RenderLayer {
                 .program(new RenderPhase.ShaderProgram(() -> SegmentationShaderManager.getInstance().getEntityProgram()))
                 .transparency(NO_TRANSPARENCY)
                 .writeMaskState(ALL_MASK)
-                .cull(DISABLE_CULLING)
-                .layering(VIEW_OFFSET_Z_LAYERING) // Fix Z-fighting for entity layers
+                .cull(ENABLE_CULLING)
+                .layering(NO_LAYERING) // Standard entity rendering
                 .build(false)
         );
         // System.out.println("[SEGMOD LAYER] Created EntityRenderLayer: " + layer);

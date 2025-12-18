@@ -36,14 +36,21 @@ public class SegmentationVertexConsumerProvider implements VertexConsumerProvide
             return NoOpVertexConsumer.INSTANCE;
         }
         
-        if (layerStr.contains("solid") || layerStr.contains("cutout") || layerStr.contains("translucent")) {
-             // Block layer
-             targetLayer = SegmentationRenderLayer.getLayer();
-             safeMode = false; // We need texture coords for blocks
-        } else {
+        // Check for entity layers first!
+        // Entity layers often contain "cutout" or "solid" in their name (e.g. "entity_cutout"),
+        // so we must check for "entity" before checking for generic "cutout"/"solid".
+        if (layerStr.contains("entity")) {
              // Entity layer
              targetLayer = SegmentationRenderLayer.getEntityLayer();
              safeMode = true; // Entity shader doesn't use texture coords
+        } else if (layerStr.contains("solid") || layerStr.contains("cutout") || layerStr.contains("translucent")) {
+             // Block layer (only if not an entity layer)
+             targetLayer = SegmentationRenderLayer.getLayer();
+             safeMode = false; // We need texture coords for blocks
+        } else {
+             // Fallback (likely an entity or other non-block item)
+             targetLayer = SegmentationRenderLayer.getEntityLayer();
+             safeMode = true;
         }
         
         VertexConsumer result = new SegmentationVertexConsumer(delegate.getBuffer(targetLayer), safeMode);
